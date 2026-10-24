@@ -1,0 +1,97 @@
+.ui-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  z-index: 1000;
+  animation: ui-fade-in var(--transition-fast) ease-out;
+}
+
+.ui-dialog {
+  background-color: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-dialog);
+  width: 100%;
+  max-height: calc(100vh - 2rem);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: ui-scale-in var(--transition-fast) ease-out;
+}
+
+/* Sizes */
+.ui-dialog--sm { max-width: 420px; }
+.ui-dialog--md { max-width: 560px; }
+.ui-dialog--lg { max-width: 720px; }
+
+.ui-dialog__header {
+  padding: var(--space-5) var(--space-6);
+  border-bottom: 1px solid var(--color-border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.ui-dialog__title {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-main);
+  line-height: var(--line-height-tight);
+}
+
+.ui-dialog__close {
+  padding: var(--space-1);
+  color: var(--color-slate-400);
+  border-radius: var(--radius-sm);
+  transition: color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.ui-dialog__close:hover {
+  color: var(--color-slate-700);
+  background-color: var(--color-slate-100);
+}
+
+[data-theme="dark"] .ui-dialog__close:hover {
+  color: var(--color-slate-200);
+  background-color: var(--color-slate-800);
+}
+
+.ui-dialog__body {
+  padding: var(--space-6);
+  overflow-y: auto;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-body);
+  line-height: var(--line-height-normal);
+}
+
+.ui-dialog__footer {
+  padding: var(--space-4) var(--space-6);
+  border-top: 1px solid var(--color-border-subtle);
+  background-color: var(--color-bg-surface-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+
+@keyframes ui-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes ui-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}

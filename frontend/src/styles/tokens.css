@@ -1,0 +1,214 @@
+/**
+ * University Appointment Management System - Design Tokens
+ * Conforms to WCAG AA/AAA contrast guidelines.
+ * Restrained academic palette without arbitrary gradients or visual noise.
+ */
+
+:root {
+  /* -------------------------------------------------------------------------
+   * Color Palette - Institutional Navy & Academic Neutrals
+   * ---------------------------------------------------------------------- */
+
+  /* Primary Brand: Oxford / Institutional Blue */
+  --color-primary-50: #EFF6FF;
+  --color-primary-100: #DBEAFE;
+  --color-primary-200: #BFDBFE;
+  --color-primary-500: #2563EB;
+  --color-primary-600: #1D4ED8;
+  --color-primary-700: #1E40AF;
+  --color-primary-800: #1E3A8A;
+  --color-primary-900: #172554;
+
+  /* Neutrals: Professional Slate */
+  --color-slate-50: #F8FAFC;
+  --color-slate-100: #F1F5F9;
+  --color-slate-200: #E2E8F0;
+  --color-slate-300: #CBD5E1;
+  --color-slate-400: #94A3B8;
+  --color-slate-500: #64748B;
+  --color-slate-600: #475569;
+  --color-slate-700: #334155;
+  --color-slate-800: #1E293B;
+  --color-slate-900: #0F172A;
+
+  /* Semantic - Success / Approved (Emerald) */
+  --color-success-50: #ECFDF5;
+  --color-success-100: #D1FAE5;
+  --color-success-200: #A7F3D0;
+  --color-success-600: #059669;
+  --color-success-700: #047857;
+  --color-success-800: #065F46;
+
+  /* Semantic - Warning / Pending (Warm Amber / Ochre) */
+  --color-warning-50: #FFFBEB;
+  --color-warning-100: #FEF3C7;
+  --color-warning-200: #FDE68A;
+  --color-warning-600: #D97706;
+  --color-warning-700: #B45309;
+  --color-warning-800: #92400E;
+
+  /* Semantic - Danger / Rejected / Cancelled (Crimson) */
+  --color-danger-50: #FEF2F2;
+  --color-danger-100: #FEE2E2;
+  --color-danger-200: #FECACA;
+  --color-danger-600: #DC2626;
+  --color-danger-700: #B91C1C;
+  --color-danger-800: #991B1B;
+
+  /* Semantic - Info / Neutral Status (Blue-Slate) */
+  --color-info-50: #F0F9FF;
+  --color-info-100: #E0F2FE;
+  --color-info-600: #0284C7;
+  --color-info-700: #0369A1;
+  --color-info-800: #075985;
+
+  /* Functional Surfaces & Semantic Aliases (Light Theme Default) */
+  --color-bg-app: var(--color-slate-50);
+  --color-bg-surface: #FFFFFF;
+  --color-bg-surface-subtle: var(--color-slate-100);
+  --color-bg-header: var(--color-primary-900);
+  --color-text-header: #FFFFFF;
+  --color-text-header-muted: var(--color-primary-200);
+
+  --color-text-main: var(--color-slate-900);
+  --color-text-body: var(--color-slate-700);
+  --color-text-muted: var(--color-slate-500);
+  --color-text-inverse: #FFFFFF;
+
+  --color-border-subtle: var(--color-slate-200);
+  --color-border-default: var(--color-slate-300);
+  --color-border-strong: var(--color-slate-400);
+
+  /* Keyboard Focus Indicator (Visible 2px offset ring) */
+  --color-focus-ring: #2563EB;
+  --color-focus-ring-offset: #FFFFFF;
+
+  /* -------------------------------------------------------------------------
+   * Typography Scale
+   * ---------------------------------------------------------------------- */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  --font-size-xs: 0.75rem;    /* 12px */
+  --font-size-sm: 0.875rem;   /* 14px */
+  --font-size-base: 1rem;     /* 16px */
+  --font-size-lg: 1.125rem;   /* 18px */
+  --font-size-xl: 1.25rem;    /* 20px */
+  --font-size-2xl: 1.5rem;    /* 24px */
+  --font-size-3xl: 1.875rem;  /* 30px */
+
+  --line-height-tight: 1.25;
+  --line-height-snug: 1.375;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.625;
+
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* -------------------------------------------------------------------------
+   * Spacing System (4px Base Grid)
+   * ---------------------------------------------------------------------- */
+  --space-0-5: 2px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* -------------------------------------------------------------------------
+   * Borders & Radii (Crisp, Restrained)
+   * ---------------------------------------------------------------------- */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-full: 9999px;
+
+  /* -------------------------------------------------------------------------
+   * Elevation & Shadows
+   * ---------------------------------------------------------------------- */
+  --shadow-none: none;
+  --shadow-sm: 0 1px 2px 0 rgba(15, 23, 42, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(15, 23, 42, 0.07), 0 2px 4px -2px rgba(15, 23, 42, 0.05);
+  --shadow-lg: 0 10px 15px -3px rgba(15, 23, 42, 0.08), 0 4px 6px -4px rgba(15, 23, 42, 0.03);
+  --shadow-dialog: 0 20px 25px -5px rgba(15, 23, 42, 0.15), 0 8px 10px -6px rgba(15, 23, 42, 0.08);
+
+  /* -------------------------------------------------------------------------
+   * Motion (Controlled, Accessible)
+   * ---------------------------------------------------------------------- */
+  --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-normal: 200ms cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* -------------------------------------------------------------------------
+   * Layout Containers & Breakpoints
+   * ---------------------------------------------------------------------- */
+  --content-max-width: 1280px;
+  --sidebar-width: 260px;
+  --header-height: 64px;
+  --min-tap-target: 44px;
+}
+
+/* ---------------------------------------------------------------------------
+ * Dark Theme Overrides (High-contrast, institutional slate)
+ * ------------------------------------------------------------------------ */
+[data-theme="dark"] {
+  --color-bg-app: #0B0F19;
+  --color-bg-surface: #111827;
+  --color-bg-surface-subtle: #1F2937;
+  --color-bg-header: #030712;
+  --color-text-header: #F9FAFB;
+  --color-text-header-muted: #9CA3AF;
+
+  --color-text-main: #F9FAFB;
+  --color-text-body: #E5E7EB;
+  --color-text-muted: #9CA3AF;
+  --color-text-inverse: #111827;
+
+  --color-border-subtle: #374151;
+  --color-border-default: #4B5563;
+  --color-border-strong: #6B7280;
+
+  --color-primary-50: #1E293B;
+  --color-primary-100: #1E3A8A;
+  --color-primary-200: #2563EB;
+  --color-primary-700: #3B82F6;
+  --color-primary-800: #60A5FA;
+
+  --color-success-50: #064E3B;
+  --color-success-100: #065F46;
+  --color-success-700: #34D399;
+
+  --color-warning-50: #451A03;
+  --color-warning-100: #78350F;
+  --color-warning-700: #FBBF24;
+
+  --color-danger-50: #450A0A;
+  --color-danger-100: #7F1D1D;
+  --color-danger-700: #F87171;
+
+  --color-focus-ring: #60A5FA;
+  --color-focus-ring-offset: #111827;
+
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+  --shadow-dialog: 0 20px 25px -5px rgba(0, 0, 0, 0.7);
+}
+
+/* Reduced motion accessibility */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

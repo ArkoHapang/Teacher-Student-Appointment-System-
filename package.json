@@ -1,0 +1,49 @@
+{
+  "name": "teacher-student-appointment-system",
+  "version": "1.0.0",
+  "description": "University Teacher-Student Appointment System - Backend API & Database",
+  "main": "backend/src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node backend/src/server.js",
+    "dev": "node backend/src/server.js",
+    "test": "node --test --test-concurrency=1 backend/tests/*.test.js",
+    "test:auth": "node backend/tests/auth.test.js",
+    "test:appointments": "node backend/tests/appointments.test.js",
+    "test:conflicts": "node backend/tests/conflicts.test.js",
+    "test:teachers": "node backend/tests/adminTeachers.test.js",
+    "test:admin-appointments": "node backend/tests/adminAppointments.test.js",
+    "test:logout": "node backend/tests/logout.test.js",
+    "test:student": "node backend/tests/studentWorkflows.test.js",
+    "test:teacher": "node backend/tests/teacherWorkflows.test.js",
+    "test:e2e": "node backend/tests/e2eFullStackIntegration.test.js",
+    "test:security": "node backend/tests/securityDefensiveReview.test.js",
+    "migrate": "node database/migrate.js",
+    "migrate:reset": "node database/migrate.js --reset",
+    "migrate:ps": "powershell -ExecutionPolicy Bypass -File database/migrate.ps1",
+    "test:db": "powershell -ExecutionPolicy Bypass -File database/test_schema.ps1",
+    "test:backend": "powershell -ExecutionPolicy Bypass -File backend/test_foundation.ps1",
+    "frontend:dev": "npm --prefix frontend run dev",
+    "frontend:build": "npm --prefix frontend run build",
+    "frontend:typecheck": "npm --prefix frontend run typecheck"
+  },
+  "keywords": [
+    "university",
+    "appointment-system",
+    "teacher-student",
+    "scheduling",
+    "rbac"
+  ],
+  "author": "Engineering Architecture Team",
+  "license": "ISC",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.3"
+  },
+  "devDependencies": {
+    "supertest": "^7.0.0"
+  }
+}

@@ -1,0 +1,107 @@
+.ui-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-0-5) var(--space-2);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+
+.ui-badge--pill {
+  border-radius: var(--radius-full);
+  padding: var(--space-0-5) var(--space-2);
+}
+
+.ui-badge__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: currentColor;
+}
+
+/* Variant: Pending (Amber/Ochre) */
+.ui-badge--pending {
+  background-color: var(--color-warning-50);
+  color: var(--color-warning-800);
+  border-color: var(--color-warning-200);
+}
+
+/* Variant: Approved & Active (Emerald) */
+.ui-badge--approved,
+.ui-badge--active {
+  background-color: var(--color-success-50);
+  color: var(--color-success-800);
+  border-color: var(--color-success-200);
+}
+
+/* Variant: Rejected, Cancelled & Suspended (Crimson) */
+.ui-badge--rejected,
+.ui-badge--suspended {
+  background-color: var(--color-danger-50);
+  color: var(--color-danger-800);
+  border-color: var(--color-danger-200);
+}
+
+.ui-badge--cancelled {
+  background-color: var(--color-slate-100);
+  color: var(--color-slate-700);
+  border-color: var(--color-slate-300);
+}
+
+/* Variant: Completed & Info (Blue/Slate) */
+.ui-badge--completed,
+.ui-badge--info {
+  background-color: var(--color-info-50);
+  color: var(--color-info-800);
+  border-color: var(--color-info-100);
+}
+
+/* Variant: Inactive & Default */
+.ui-badge--inactive,
+.ui-badge--default {
+  background-color: var(--color-slate-100);
+  color: var(--color-slate-700);
+  border-color: var(--color-slate-200);
+}
+
+/* Dark theme badge adjustments */
+[data-theme="dark"] .ui-badge--pending {
+  background-color: var(--color-warning-50);
+  color: var(--color-warning-700);
+  border-color: var(--color-warning-800);
+}
+
+[data-theme="dark"] .ui-badge--approved,
+[data-theme="dark"] .ui-badge--active {
+  background-color: var(--color-success-50);
+  color: var(--color-success-700);
+  border-color: var(--color-success-800);
+}
+
+[data-theme="dark"] .ui-badge--rejected,
+[data-theme="dark"] .ui-badge--suspended {
+  background-color: var(--color-danger-50);
+  color: var(--color-danger-700);
+  border-color: var(--color-danger-800);
+}
+
+[data-theme="dark"] .ui-badge--completed,
+[data-theme="dark"] .ui-badge--info {
+  background-color: var(--color-slate-800);
+  color: var(--color-info-600);
+  border-color: var(--color-slate-700);
+}
+
+[data-theme="dark"] .ui-badge--inactive,
+[data-theme="dark"] .ui-badge--default,
+[data-theme="dark"] .ui-badge--cancelled {
+  background-color: var(--color-slate-800);
+  color: var(--color-slate-300);
+  border-color: var(--color-slate-700);
+}
