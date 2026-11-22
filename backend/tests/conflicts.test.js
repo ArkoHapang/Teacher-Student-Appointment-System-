@@ -63,6 +63,15 @@ async function runConflictTests() {
   const createdSlotIds = [];
   const createdAppointmentIds = [];
 
+  const getFutureDate = (daysAhead = 7) => {
+    const d = new Date();
+    d.setDate(d.getDate() + daysAhead);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   const createTestSlot = async ({
     teacherId = 1,
     date = '2026-11-20',
@@ -301,10 +310,11 @@ async function runConflictTests() {
     });
 
     await test('Allows adjacent appointments for same teacher without conflict (201 Created)', async () => {
+      const adjacentDate = getFutureDate(7);
       // Slot A: 09:00 to 09:30
-      const slotA = await createTestSlot({ teacherId: 1, date: '2026-11-22', start: '09:00:00', end: '09:30:00' });
+      const slotA = await createTestSlot({ teacherId: 1, date: adjacentDate, start: '09:00:00', end: '09:30:00' });
       // Slot B: 09:30 to 10:00 (adjacent immediately after Slot A)
-      const slotB = await createTestSlot({ teacherId: 1, date: '2026-11-22', start: '09:30:00', end: '10:00:00' });
+      const slotB = await createTestSlot({ teacherId: 1, date: adjacentDate, start: '09:30:00', end: '10:00:00' });
 
       const res1 = await request(app)
         .post('/api/v1/appointments')
@@ -330,10 +340,11 @@ async function runConflictTests() {
     });
 
     await test('Allows different teachers at the exact same time without conflict (201 Created)', async () => {
+      const concurrentDate = getFutureDate(8);
       // Teacher 1 (Dr. Miller) at 10:00 - 10:30
-      const millerSlot = await createTestSlot({ teacherId: 1, date: '2026-11-22', start: '10:00:00', end: '10:30:00' });
+      const millerSlot = await createTestSlot({ teacherId: 1, date: concurrentDate, start: '10:00:00', end: '10:30:00' });
       // Teacher 2 (Dr. Jenkins) at exact same time: 10:00 - 10:30
-      const jenkinsSlot = await createTestSlot({ teacherId: 2, date: '2026-11-22', start: '10:00:00', end: '10:30:00' });
+      const jenkinsSlot = await createTestSlot({ teacherId: 2, date: concurrentDate, start: '10:00:00', end: '10:30:00' });
 
       const res1 = await request(app)
         .post('/api/v1/appointments')
