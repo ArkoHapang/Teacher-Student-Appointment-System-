@@ -10,6 +10,33 @@ const { execFileSync } = require('child_process');
 const env = require('./env');
 const logger = require('./logger');
 
+/**
+ * Fail-fast safety guard: Refuses to open the development database if running in test mode
+ * or if test runner/files are detected in process arguments.
+ */
+function assertDatabaseSafety(targetDbFile) {
+  const normalizedTarget = path.normalize(path.resolve(targetDbFile)).toLowerCase();
+  const devDbPath = path.normalize(path.resolve(process.cwd(), 'database/appointment_system.db')).toLowerCase();
+
+  const isTestEnv = (process.env.NODE_ENV === 'test');
+  const isTestArg = process.argv.some(arg =>
+    arg.includes('test') || arg.endsWith('.test.js') || arg.endsWith('test-admin-integration.cjs')
+  );
+  const isTestMain = Boolean(
+    (require.main && require.main.filename && (require.main.filename.includes('test') || require.main.filename.includes('test-admin-integration.cjs'))) ||
+    (process.mainModule && process.mainModule.filename && (process.mainModule.filename.includes('test') || process.mainModule.filename.includes('test-admin-integration.cjs')))
+  );
+
+  if (isTestEnv || isTestArg || isTestMain) {
+    if (normalizedTarget === devDbPath) {
+      throw new Error(`[CRITICAL SAFETY VIOLATION] Refusing database connection! Test process attempted to open development database: ${targetDbFile}`);
+    }
+  }
+}
+
+// Enforce fail-fast safety check before initiating connection
+assertDatabaseSafety(env.db.file);
+
 let nativeDriver = null;
 
 // Attempt to load native drivers (better-sqlite3, node:sqlite, sqlite3)
@@ -56,6 +83,7 @@ try {
  */
 function executeNativeBridge(sql, isQuery = true) {
   const dbPath = env.db.file;
+  assertDatabaseSafety(dbPath);
   if (!fs.existsSync(dbPath)) {
     throw new Error(`Database file not found at: ${dbPath}`);
   }
@@ -196,8 +224,35 @@ const db = {
    * Execute an atomic transaction block.
    * Uses BEGIN IMMEDIATE to acquire exclusive write locks and eliminate race condition deadlocks.
    * Automatically commits on success and rolls back on failure.
+   * Supports transaction-scoped afterCommit(callback) post-commit event dispatch.
+   *
+   * TRANSACTION GUARANTEES & NON-DRIVER FALLBACK LIMITATIONS:
+   * - When nativeDriver is active (better-sqlite3 / node:sqlite), multi-statement
+   *   atomic transactions are fully supported with BEGIN IMMEDIATE and COMMIT/ROLLBACK.
+   *   Post-commit callbacks registered via tx.afterCommit(callback) run strictly after
+   *   a confirmed, successful COMMIT.
+   * - When nativeDriver is unavailable (PowerShell winsqlite3 fallback bridge), each query
+   *   executes in an isolated ad-hoc process and atomic multi-statement transactions cannot
+   *   be guaranteed. In this fallback mode, no true database COMMIT takes place; therefore,
+   *   post-commit callbacks are strictly discarded and never executed, preventing false
+   *   post-commit side effects (such as premature or invalid SSE event emissions).
    */
   async transaction(fn) {
+    const postCommitCallbacks = [];
+    const tx = {
+      query: (sql, params) => this.query(sql, params),
+      queryOne: (sql, params) => this.queryOne(sql, params),
+      execute: (sql, params) => this.execute(sql, params),
+      ping: () => this.ping(),
+      getPath: () => this.getPath(),
+      transaction: (nestedFn) => this.transaction(nestedFn),
+      afterCommit: (callback) => {
+        if (typeof callback === 'function') {
+          postCommitCallbacks.push(callback);
+        }
+      }
+    };
+
     if (nativeDriver) {
       if (nativeDriver.exec) {
         nativeDriver.exec('BEGIN IMMEDIATE;');
@@ -205,12 +260,27 @@ const db = {
         await this.execute('BEGIN IMMEDIATE;');
       }
       try {
-        const result = await fn(this);
+        const result = await fn(tx);
         if (nativeDriver.exec) {
           nativeDriver.exec('COMMIT;');
         } else {
           await this.execute('COMMIT;');
         }
+
+        // Execute post-commit callbacks safely ONLY after confirmed successful COMMIT
+        for (const cb of postCommitCallbacks) {
+          try {
+            const ret = cb();
+            if (ret && typeof ret.catch === 'function') {
+              ret.catch((asyncErr) => {
+                logger.error(`[Database] Asynchronous post-commit callback error: ${asyncErr.message}`, { error: asyncErr });
+              });
+            }
+          } catch (syncErr) {
+            logger.error(`[Database] Synchronous post-commit callback error: ${syncErr.message}`, { error: syncErr });
+          }
+        }
+
         return result;
       } catch (err) {
         try {
@@ -222,10 +292,31 @@ const db = {
         } catch (rbErr) {
           // Rollback error swallowed if already rolled back by sqlite
         }
+        // Notice: postCommitCallbacks are discarded on rollback or commit failure
         throw err;
       }
     }
-    return fn(this);
+
+    // Non-native fallback: cannot guarantee atomic transaction boundary or confirmed COMMIT.
+    // Discard any registered postCommitCallbacks so they never execute without a real COMMIT.
+    const result = await fn(tx);
+    if (postCommitCallbacks.length > 0) {
+      logger.warn(
+        `[Database] Non-native driver fallback cannot guarantee transactional COMMIT; discarded ${postCommitCallbacks.length} post-commit callback(s).`
+      );
+      postCommitCallbacks.length = 0;
+    }
+    return result;
+  },
+
+  /**
+   * Internal test helper for inspecting or simulating driver states.
+   */
+  _getNativeDriver() {
+    return nativeDriver;
+  },
+  _setNativeDriver(driver) {
+    nativeDriver = driver;
   }
 };
 

@@ -8,12 +8,13 @@
  * 5. Rescheduling workflow with faculty availability slots.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { studentService } from '../../services/studentService';
-import { StudentAppointmentItem, TeacherAvailabilitySlot } from '../../types/student';
+import { StudentAppointmentItem, TeacherAvailabilitySlot, FeedbackFetchState } from '../../types/student';
 import { AppointmentHistoryRecord } from '../../types/admin';
 import { Button } from '../../components/Button/Button';
-import { FormField, TextInput, Select } from '../../components/Form/Form';
+import { FormField, TextInput, Select, Textarea } from '../../components/Form/Form';
+import { StarRating, RatingBadge } from '../../components/Rating/StarRating';
 import { Table } from '../../components/Table/Table';
 import { AppointmentStatusBadge } from '../../components/Badge/Badge';
 import { Dialog } from '../../components/Dialog/Dialog';
@@ -53,6 +54,82 @@ export const StudentAppointmentsView: React.FC<StudentAppointmentsViewProps> = (
   const [actionSubmitting, setActionSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
+  // Feedback state & caching (Phase 5)
+  const [feedbackMap, setFeedbackMap] = useState<Record<number, FeedbackFetchState>>({});
+  const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
+  const [feedbackAppointment, setFeedbackAppointment] = useState<StudentAppointmentItem | null>(null);
+  const [feedbackRating, setFeedbackRating] = useState<number>(5);
+  const [feedbackComments, setFeedbackComments] = useState('');
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const [feedbackError, setFeedbackError] = useState<string | null>(null);
+
+  // Synchronized ref to feedbackMap for reading current cache state in callbacks/effects without dependency cycles
+  const feedbackMapRef = useRef(feedbackMap);
+  feedbackMapRef.current = feedbackMap;
+
+  // Tracks in-flight request IDs to prevent duplicate concurrent network requests
+  const inFlightRequestsRef = useRef<Set<number>>(new Set());
+
+  // Tracks component mounted state to prevent state updates after unmount
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  const loadFeedbackForAppointment = useCallback(async (appointmentId: number, force = false) => {
+    // Prevent duplicate concurrent requests for the same appointment ID
+    if (inFlightRequestsRef.current.has(appointmentId)) {
+      return;
+    }
+
+    // Unless explicitly forced (e.g. retry after error), skip if already loading or successfully loaded
+    if (!force) {
+      const currentState = feedbackMapRef.current[appointmentId];
+      if (currentState && (currentState.status === 'loading' || currentState.status === 'success')) {
+        return;
+      }
+    }
+
+    inFlightRequestsRef.current.add(appointmentId);
+    setFeedbackMap(prev => ({
+      ...prev,
+      [appointmentId]: { status: 'loading' }
+    }));
+
+    try {
+      const fb = await studentService.getFeedback(appointmentId);
+      if (!isMountedRef.current) return;
+
+      setFeedbackMap(prev => {
+        // Stale guard: if feedback was already recorded/submitted with data, do not overwrite with null
+        const existing = prev[appointmentId];
+        if (existing?.status === 'success' && existing.data && !fb) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [appointmentId]: { status: 'success', data: fb }
+        };
+      });
+    } catch (err: unknown) {
+      if (!isMountedRef.current) return;
+      const errorObj = err as { message?: string };
+      setFeedbackMap(prev => ({
+        ...prev,
+        [appointmentId]: {
+          status: 'error',
+          error: errorObj.message || 'Failed to retrieve feedback record.'
+        }
+      }));
+    } finally {
+      inFlightRequestsRef.current.delete(appointmentId);
+    }
+  }, []);
+
   const loadAppointments = useCallback(async () => {
     setIsLoading(true);
     setErrorMessage(null);
@@ -71,6 +148,17 @@ export const StudentAppointmentsView: React.FC<StudentAppointmentsViewProps> = (
     loadAppointments();
   }, [loadAppointments]);
 
+  // Proactively cache feedback for COMPLETED consultations without duplicate queries or invalidation cycles
+  useEffect(() => {
+    const completed = appointments.filter(a => a.status === 'COMPLETED');
+    completed.forEach(a => {
+      const currentState = feedbackMapRef.current[a.id];
+      if (!currentState || currentState.status === 'idle') {
+        loadFeedbackForAppointment(a.id);
+      }
+    });
+  }, [appointments, loadFeedbackForAppointment]);
+
   const handleOpenDetails = async (appt: StudentAppointmentItem) => {
     setSelectedAppointment(appt);
     setIsDetailOpen(true);
@@ -79,6 +167,13 @@ export const StudentAppointmentsView: React.FC<StudentAppointmentsViewProps> = (
     setHistory([]);
     setHistoryLoading(true);
 
+    if (appt.status === 'COMPLETED') {
+      const currentState = feedbackMapRef.current[appt.id];
+      if (!currentState || currentState.status === 'idle') {
+        loadFeedbackForAppointment(appt.id);
+      }
+    }
+
     try {
       const hist = await studentService.getAppointmentHistory(appt.id);
       setHistory(hist);
@@ -86,6 +181,50 @@ export const StudentAppointmentsView: React.FC<StudentAppointmentsViewProps> = (
       // History optional or handled
     } finally {
       setHistoryLoading(false);
+    }
+  };
+
+  const handleOpenFeedback = (appt: StudentAppointmentItem) => {
+    setFeedbackAppointment(appt);
+    setFeedbackRating(5);
+    setFeedbackComments('');
+    setFeedbackError(null);
+    setIsFeedbackOpen(true);
+  };
+
+  const handleSubmitFeedback = async () => {
+    if (!feedbackAppointment) return;
+    if (feedbackRating < 1 || feedbackRating > 5) {
+      setFeedbackError('Please select a rating between 1 and 5 stars.');
+      return;
+    }
+
+    setFeedbackSubmitting(true);
+    setFeedbackError(null);
+
+    try {
+      const created = await studentService.submitFeedback(feedbackAppointment.id, {
+        rating: feedbackRating,
+        comments: feedbackComments.trim() || undefined
+      });
+
+      setFeedbackMap(prev => ({
+        ...prev,
+        [feedbackAppointment.id]: { status: 'success', data: created }
+      }));
+
+      setSuccessMessage('Thank you! Your consultation feedback has been submitted successfully.');
+      setIsFeedbackOpen(false);
+      setFeedbackAppointment(null);
+    } catch (err: unknown) {
+      const errorObj = err as { message?: string; code?: string; status?: number };
+      if (errorObj.code === 'DUPLICATE_FEEDBACK' || errorObj.status === 409) {
+        setFeedbackError('Feedback has already been submitted for this consultation.');
+      } else {
+        setFeedbackError(errorObj.message || 'Failed to submit feedback. Please try again.');
+      }
+    } finally {
+      setFeedbackSubmitting(false);
     }
   };
 
@@ -231,19 +370,45 @@ export const StudentAppointmentsView: React.FC<StudentAppointmentsViewProps> = (
       key: 'actions',
       header: 'Actions',
       align: 'right',
-      width: '120px',
-      render: row => (
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handleOpenDetails(row)}
-            aria-label={`View details and status history for appointment #${row.id}`}
-          >
-            Details
-          </Button>
-        </div>
-      )
+      width: '180px',
+      render: row => {
+        const fbState = feedbackMap[row.id];
+        return (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', alignItems: 'center' }}>
+            {row.status === 'COMPLETED' && (
+              fbState?.status === 'success' && fbState.data ? (
+                <RatingBadge rating={fbState.data.rating} />
+              ) : fbState?.status === 'success' && fbState.data === null ? (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => handleOpenFeedback(row)}
+                  aria-label={`Leave feedback for completed consultation #${row.id}`}
+                >
+                  Leave Feedback
+                </Button>
+              ) : fbState?.status === 'error' ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => loadFeedbackForAppointment(row.id, true)}
+                  aria-label={`Retry loading feedback status for consultation #${row.id}`}
+                >
+                  Retry
+                </Button>
+              ) : null
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleOpenDetails(row)}
+              aria-label={`View details and status history for appointment #${row.id}`}
+            >
+              Details
+            </Button>
+          </div>
+        );
+      }
     }
   ];
 
@@ -410,6 +575,133 @@ export const StudentAppointmentsView: React.FC<StudentAppointmentsViewProps> = (
               </div>
             </div>
 
+            {/* Consultation Feedback Display (Only for COMPLETED) */}
+            {selectedAppointment.status === 'COMPLETED' && (
+              <div
+                style={{
+                  borderTop: '1px solid var(--color-border-subtle)',
+                  paddingTop: '14px',
+                  marginBottom: '16px'
+                }}
+              >
+                <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', marginBottom: '8px' }}>
+                  Consultation Feedback
+                </div>
+                {(() => {
+                  const fbState = feedbackMap[selectedAppointment.id];
+                  if (!fbState || fbState.status === 'loading') {
+                    return (
+                      <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
+                        Checking feedback status...
+                      </div>
+                    );
+                  }
+                  if (fbState.status === 'error') {
+                    return (
+                      <div
+                        style={{
+                          padding: '12px',
+                          backgroundColor: 'var(--color-danger-50)',
+                          borderRadius: 'var(--radius-sm)',
+                          border: '1px solid var(--color-danger-200)',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          gap: '8px'
+                        }}
+                      >
+                        <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-danger-800)' }}>
+                          <strong>Unable to load feedback:</strong> {fbState.error}
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => loadFeedbackForAppointment(selectedAppointment.id, true)}
+                        >
+                          Retry
+                        </Button>
+                      </div>
+                    );
+                  }
+                  if (fbState.status === 'success' && fbState.data) {
+                    return (
+                      <div
+                        style={{
+                          padding: '12px',
+                          backgroundColor: 'var(--color-bg-surface-subtle)',
+                          borderRadius: 'var(--radius-sm)',
+                          border: '1px solid var(--color-border-subtle)'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+                          <StarRating value={fbState.data.rating} disabled size={18} />
+                          <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
+                            Submitted on {new Date(fbState.data.createdAt).toLocaleDateString()}
+                          </span>
+                        </div>
+                        {fbState.data.comments ? (
+                          <div
+                            style={{
+                              fontSize: 'var(--font-size-sm)',
+                              backgroundColor: 'var(--color-bg-app)',
+                              padding: '8px 10px',
+                              borderRadius: 'var(--radius-xs)',
+                              color: 'var(--color-text-main)',
+                              whiteSpace: 'pre-wrap'
+                            }}
+                          >
+                            {fbState.data.comments}
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
+                            No written comments provided with this rating.
+                          </div>
+                        )}
+                        <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginTop: '8px' }}>
+                          Feedback is permanently recorded and cannot be edited or deleted.
+                        </div>
+                      </div>
+                    );
+                  }
+                  if (fbState.status === 'success' && fbState.data === null) {
+                    return (
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '12px',
+                          backgroundColor: 'var(--color-bg-surface-subtle)',
+                          borderRadius: 'var(--radius-sm)',
+                          border: '1px dashed var(--color-border-subtle)'
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: 'var(--font-size-sm)', color: 'var(--color-text-main)' }}>
+                            Feedback Pending
+                          </div>
+                          <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
+                            Share your feedback to help improve future consultations.
+                          </div>
+                        </div>
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          onClick={() => {
+                            setIsDetailOpen(false);
+                            handleOpenFeedback(selectedAppointment);
+                          }}
+                        >
+                          Leave Feedback
+                        </Button>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+              </div>
+            )}
+
             {/* Action Buttons (Cancel / Reschedule) */}
             {!activeAction && ['PENDING', 'APPROVED', 'RESCHEDULE_PENDING'].includes(selectedAppointment.status) && (
               <div style={{ borderTop: '1px solid var(--color-border-subtle)', paddingTop: '12px', marginBottom: '16px', display: 'flex', gap: '8px' }}>
@@ -563,6 +855,95 @@ export const StudentAppointmentsView: React.FC<StudentAppointmentsViewProps> = (
                   ))}
                 </div>
               )}
+            </div>
+          </div>
+        )}
+      </Dialog>
+
+      {/* -------------------------------------------------------------
+       * Modal: Consultation Feedback Dialog (Phase 5)
+       * ----------------------------------------------------------- */}
+      <Dialog
+        isOpen={isFeedbackOpen}
+        onClose={() => {
+          if (!feedbackSubmitting) setIsFeedbackOpen(false);
+        }}
+        title={`Consultation Feedback #${feedbackAppointment?.id ?? ''}`}
+        size="md"
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+            <Button
+              variant="secondary"
+              size="md"
+              disabled={feedbackSubmitting}
+              onClick={() => setIsFeedbackOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              size="md"
+              isLoading={feedbackSubmitting}
+              onClick={handleSubmitFeedback}
+            >
+              Submit Feedback
+            </Button>
+          </div>
+        }
+      >
+        {feedbackAppointment && (
+          <div>
+            <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-muted)', marginBottom: '16px' }}>
+              Please provide feedback for your consultation with{' '}
+              <strong>
+                {feedbackAppointment.teacherFirstName} {feedbackAppointment.teacherLastName}
+              </strong>{' '}
+              on {feedbackAppointment.slotDate} ({feedbackAppointment.startTime.slice(0, 5)} - {feedbackAppointment.endTime.slice(0, 5)}).
+            </p>
+
+            {feedbackError && (
+              <div style={{ marginBottom: '16px' }}>
+                <Alert variant="error">{feedbackError}</Alert>
+              </div>
+            )}
+
+            <div style={{ marginBottom: '20px' }}>
+              <FormField
+                label="Rating"
+                htmlFor="feedback-star-rating"
+                required
+                helperText="Select a rating from 1 to 5 stars."
+              >
+                <StarRating
+                  id="feedback-star-rating"
+                  value={feedbackRating}
+                  onChange={r => setFeedbackRating(r)}
+                  disabled={feedbackSubmitting}
+                  size={28}
+                />
+              </FormField>
+            </div>
+
+            <div style={{ marginBottom: '8px' }}>
+              <FormField
+                label="Comments (Optional)"
+                htmlFor="feedback-comments"
+                helperText={`${feedbackComments.length}/1000 characters`}
+              >
+                <Textarea
+                  id="feedback-comments"
+                  placeholder="Share constructive feedback regarding the advice, clarity, or usefulness of this session..."
+                  value={feedbackComments}
+                  onChange={e => {
+                    if (e.target.value.length <= 1000) {
+                      setFeedbackComments(e.target.value);
+                    }
+                  }}
+                  maxLength={1000}
+                  rows={4}
+                  disabled={feedbackSubmitting}
+                />
+              </FormField>
             </div>
           </div>
         )}

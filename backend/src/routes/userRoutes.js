@@ -17,5 +17,9 @@ router.use(authenticate);
 router.get('/:id', authorizeOwnerOrAdmin('id'), userController.getProfile);
 router.patch('/:id', authorizeOwnerOrAdmin('id'), userController.updateProfile);
 router.get('/:id/notifications', authorizeOwnerOrAdmin('id'), userController.getNotifications);
+router.patch('/:id/notifications/read-all', authorizeOwnerOrAdmin('id'), userController.markAllNotificationsAsRead);
+router.post('/:id/notifications/mark-all-read', authorizeOwnerOrAdmin('id'), userController.markAllNotificationsAsRead);
+router.patch('/:id/notifications/:notificationId/read', authorizeOwnerOrAdmin('id'), userController.markNotificationAsRead);
+router.patch('/:id/notifications/:notificationId', authorizeOwnerOrAdmin('id'), userController.markNotificationAsRead);
 
 module.exports = router;

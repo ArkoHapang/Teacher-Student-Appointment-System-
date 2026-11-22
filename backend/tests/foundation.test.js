@@ -3,6 +3,7 @@
  * Validates environment settings, database connectivity, migration status, and health endpoints.
  */
 
+require('./setup');
 const assert = require('assert');
 const path = require('path');
 const fs = require('fs');

@@ -12,6 +12,7 @@
  * 9. Server-enforced RBAC restrictions (student forbidden from admin functions)
  */
 
+require('./setup');
 const assert = require('assert');
 const http = require('http');
 const app = require('../src/app');

@@ -16,6 +16,7 @@
  *    - Admin privileges enforced on the server
  */
 
+require('./setup');
 const assert = require('assert');
 const request = require('supertest');
 const jwt = require('jsonwebtoken');

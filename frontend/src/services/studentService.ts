@@ -10,7 +10,9 @@ import {
   TeacherDirectoryItem,
   TeacherAvailabilitySlot,
   StudentAppointmentItem,
-  StudentNotificationItem
+  StudentNotificationItem,
+  ConsultationFeedback,
+  SubmitFeedbackPayload
 } from '../types/student';
 import { AppointmentHistoryRecord } from '../types/admin';
 
@@ -133,6 +135,19 @@ function normalizeHistory(raw: any): AppointmentHistoryRecord {
   };
 }
 
+function normalizeFeedback(raw: any): ConsultationFeedback | null {
+  if (!raw) return null;
+  return {
+    id: raw.id,
+    appointmentId: raw.appointmentId ?? raw.appointment_id,
+    studentId: raw.studentId ?? raw.student_id,
+    teacherId: raw.teacherId ?? raw.teacher_id,
+    rating: Number(raw.rating),
+    comments: raw.comments !== undefined ? raw.comments : null,
+    createdAt: raw.createdAt ?? raw.created_at
+  };
+}
+
 export const studentService = {
   // -------------------------------------------------------------
   // Profile Workflows
@@ -225,5 +240,36 @@ export const studentService = {
       `/api/v1/users/${userId}/notifications`
     );
     return (res.data.notifications || []).map(normalizeNotification);
+  },
+
+  async markNotificationAsRead(userId: number, notificationId: number): Promise<StudentNotificationItem> {
+    const res = await apiClient.patch<any>(
+      `/api/v1/users/${userId}/notifications/${notificationId}/read`
+    );
+    return normalizeNotification(res.data);
+  },
+
+  async markAllNotificationsAsRead(userId: number): Promise<{ recipientId: number; updatedCount: number }> {
+    const res = await apiClient.patch<{ recipientId: number; updatedCount: number }>(
+      `/api/v1/users/${userId}/notifications/read-all`
+    );
+    return res.data;
+  },
+
+  // -------------------------------------------------------------
+  // Consultation Feedback & Ratings (Phase 5)
+  // -------------------------------------------------------------
+  async submitFeedback(appointmentId: number, data: SubmitFeedbackPayload): Promise<ConsultationFeedback> {
+    const res = await apiClient.post<any>(`/api/v1/appointments/${appointmentId}/feedback`, data);
+    const normalized = normalizeFeedback(res.data);
+    if (!normalized) {
+      throw new Error('Failed to parse feedback response.');
+    }
+    return normalized;
+  },
+
+  async getFeedback(appointmentId: number): Promise<ConsultationFeedback | null> {
+    const res = await apiClient.get<any>(`/api/v1/appointments/${appointmentId}/feedback`);
+    return normalizeFeedback(res.data);
   }
 };

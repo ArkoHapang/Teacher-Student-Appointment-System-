@@ -12,12 +12,16 @@
  * 8. Logout and session invalidation
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AuthUser, authService } from './services/authService';
 import { apiClient } from './services/apiClient';
+import { sessionSync } from './services/sessionSync';
 import { Header, RoleNav, MobileNav } from './components/Navigation/Navigation';
 import { Alert } from './components/Alert/Alert';
 import { Button } from './components/Button/Button';
+import { notificationStreamService, RealtimeNotificationPayload } from './services/notificationStreamService';
+import { studentService } from './services/studentService';
+import { teacherService } from './services/teacherService';
 
 // Faculty / Teacher Views
 import { TeacherLoginView } from './views/teacher/TeacherLoginView';
@@ -30,12 +34,16 @@ import { TeacherProfileView } from './views/teacher/TeacherProfileView';
 // Existing Student & Admin Views (Preserved)
 import { AdminLoginView } from './views/admin/AdminLoginView';
 import { StudentLoginView } from './views/student/StudentLoginView';
+import { StudentRegisterView } from './views/student/StudentRegisterView';
 import { StudentAppointmentsView } from './views/student/StudentAppointmentsView';
 import { FindTeachersView } from './views/student/FindTeachersView';
 import { StudentNotificationsView } from './views/student/StudentNotificationsView';
 import { StudentProfileView } from './views/student/StudentProfileView';
 import { AppointmentMonitorView } from './views/admin/AppointmentMonitorView';
 import { TeacherManagementView } from './views/admin/TeacherManagementView';
+import { UserAccountsView } from './views/admin/UserAccountsView';
+import { AuditLogsView } from './views/admin/AuditLogsView';
+import { SystemStatusView } from './views/admin/SystemStatusView';
 
 import './styles/global.css';
 
@@ -52,9 +60,15 @@ type StudentTabId =
   | 'student-notifications'
   | 'student-profile';
 
-type AdminTabId = 'admin-appointments' | 'admin-teachers';
+type AdminTabId =
+  | 'admin-appointments'
+  | 'admin-teachers'
+  | 'admin-users'
+  | 'admin-audit'
+  | 'admin-health';
 
 export const App: React.FC = () => {
+  const [isInitializing, setIsInitializing] = useState<boolean>(true);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => authService.getStoredUser());
   const [loginRole, setLoginRole] = useState<'TEACHER' | 'STUDENT' | 'ADMIN'>('TEACHER');
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
@@ -67,35 +81,209 @@ export const App: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [sessionExpiredNotice, setSessionExpiredNotice] = useState<string | null>(null);
   const [logoutNotice, setLogoutNotice] = useState<string | null>(null);
+  const [studentAuthMode, setStudentAuthMode] = useState<'login' | 'register'>('login');
+  const [registeredNotice, setRegisteredNotice] = useState<string | null>(null);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState<number>(0);
+  const accountedUnreadIdsRef = useRef<Set<number>>(new Set());
+  const knownReadIdsRef = useRef<Set<number>>(new Set());
+
+  // Reconcile unread notification count and track read/unread IDs across views
+  const handleUnreadCountChange = useCallback((newCount: number, readNotificationId?: number) => {
+    const safeCount = Math.max(0, newCount);
+    if (readNotificationId) {
+      knownReadIdsRef.current.add(readNotificationId);
+      accountedUnreadIdsRef.current.delete(readNotificationId);
+    }
+    if (safeCount === 0) {
+      accountedUnreadIdsRef.current.forEach(id => knownReadIdsRef.current.add(id));
+      accountedUnreadIdsRef.current.clear();
+      setUnreadNotificationCount(0);
+      return;
+    }
+    setUnreadNotificationCount(safeCount);
+  }, []);
 
   // Apply theme attribute
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
 
-  // Verify stored session on mount
+  // Connect SSE notification stream & load initial unread count on authentication
   useEffect(() => {
-    const verifySession = async () => {
-      const stored = authService.getStoredUser();
-      const token = apiClient.getToken();
-      if (token && stored) {
-        try {
-          const freshUser = await authService.getMe();
+    if (!currentUser) {
+      notificationStreamService.disconnect();
+      accountedUnreadIdsRef.current.clear();
+      knownReadIdsRef.current.clear();
+      setUnreadNotificationCount(0);
+      return;
+    }
+
+    const userId = currentUser.id;
+    accountedUnreadIdsRef.current.clear();
+    knownReadIdsRef.current.clear();
+    setUnreadNotificationCount(0);
+
+    notificationStreamService.connect(userId);
+
+    // Fetch initial unread count according to authenticated role
+    let isMounted = true;
+    const fetchInitialUnread = async () => {
+      try {
+        let list: Array<{ id: number; isRead?: number | boolean }> = [];
+        if (currentUser.role === 'STUDENT') {
+          list = await studentService.getNotifications(userId);
+        } else if (currentUser.role === 'TEACHER') {
+          list = await teacherService.getNotifications(userId);
+        }
+        if (!isMounted) return;
+
+        let newlyDiscoveredUnread = 0;
+        for (const item of list) {
+          const itemId = Number(item.id);
+          if (!itemId || isNaN(itemId) || itemId <= 0) continue;
+
+          const isItemRead = Number(item.isRead) === 1 || item.isRead === true;
+          if (isItemRead) {
+            knownReadIdsRef.current.add(itemId);
+            accountedUnreadIdsRef.current.delete(itemId);
+          } else {
+            // Unread in persistent storage
+            if (!knownReadIdsRef.current.has(itemId) && !accountedUnreadIdsRef.current.has(itemId)) {
+              accountedUnreadIdsRef.current.add(itemId);
+              newlyDiscoveredUnread++;
+            }
+          }
+        }
+
+        // Add newly discovered unread items from REST without overwriting SSE events that arrived during the fetch
+        setUnreadNotificationCount(prev => Math.max(0, prev + newlyDiscoveredUnread));
+      } catch {
+        // Safe fallback
+      }
+    };
+
+    fetchInitialUnread();
+
+    // Subscribe to incoming real-time notifications to increment count
+    const unsubscribe = notificationStreamService.onNotification((incoming: RealtimeNotificationPayload) => {
+      const recipientId = incoming.recipientId ?? incoming.userId;
+      if (recipientId !== userId) {
+        return;
+      }
+
+      const notifId = Number(incoming.id);
+      if (!notifId || isNaN(notifId) || notifId <= 0) {
+        return;
+      }
+
+      // If incoming notification is marked read, track it as read
+      if (Number(incoming.isRead) === 1) {
+        knownReadIdsRef.current.add(notifId);
+        if (accountedUnreadIdsRef.current.has(notifId)) {
+          accountedUnreadIdsRef.current.delete(notifId);
+          setUnreadNotificationCount(prev => Math.max(0, prev - 1));
+        }
+        return;
+      }
+
+      // If already known to be read in this session, do not re-increment
+      if (knownReadIdsRef.current.has(notifId)) {
+        return;
+      }
+
+      // If already accounted for as unread, ignore duplicate SSE event
+      if (accountedUnreadIdsRef.current.has(notifId)) {
+        return;
+      }
+
+      // Fresh unread notification
+      accountedUnreadIdsRef.current.add(notifId);
+      setUnreadNotificationCount(prev => Math.max(0, prev + 1));
+    });
+
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
+  }, [currentUser]);
+
+  // Restore authenticated session on mount via HttpOnly cookie
+  useEffect(() => {
+    let isCancelled = false;
+    const initialEpoch = authService.getSessionEpoch();
+
+    const restoreSession = async () => {
+      try {
+        const freshUser = await authService.getMe();
+        if (!isCancelled && authService.getSessionEpoch() === initialEpoch) {
           setCurrentUser(freshUser);
-        } catch {
-          // Token expired or revoked
+          if (freshUser.role === 'STUDENT' || freshUser.role === 'TEACHER' || freshUser.role === 'ADMIN') {
+            setLoginRole(freshUser.role);
+          }
+        }
+      } catch (err: unknown) {
+        if (!isCancelled) {
+          const isStale =
+            (err as { isStale?: boolean })?.isStale ||
+            (err as { message?: string })?.message === 'STALE_SESSION_RESPONSE' ||
+            authService.getSessionEpoch() !== initialEpoch;
+
+          if (isStale) {
+            // Stale response: epoch changed while /auth/me was in-flight.
+            // Do NOT wipe newer state or display expired notice.
+            return;
+          }
+
+          const apiErr = err as { status?: number };
+          const hadStoredUser = Boolean(authService.getStoredUser());
+          authService.setStoredUser(null);
           setCurrentUser(null);
-          setSessionExpiredNotice('Your session has expired. Please sign in again.');
+          notificationStreamService.disconnect();
+          setUnreadNotificationCount(0);
+          if (hadStoredUser || apiErr?.status === 401) {
+            setSessionExpiredNotice('Your session has expired. Please sign in again.');
+          }
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsInitializing(false);
         }
       }
     };
 
-    verifySession();
+    restoreSession();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  // Subscribe to cross-tab remote logout synchronization events
+  useEffect(() => {
+    const unsubscribe = sessionSync.onRemoteLogout(() => {
+      notificationStreamService.disconnect();
+      accountedUnreadIdsRef.current.clear();
+      knownReadIdsRef.current.clear();
+      setUnreadNotificationCount(0);
+      authService.handleRemoteLogout();
+      setCurrentUser(null);
+      setLogoutNotice('You have been logged out from another browser tab or window.');
+      setSessionExpiredNotice(null);
+    });
+
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   // Register unauthorized listener to handle token revocation & 401
   useEffect(() => {
     apiClient.onUnauthorized(() => {
+      notificationStreamService.disconnect();
+      accountedUnreadIdsRef.current.clear();
+      knownReadIdsRef.current.clear();
+      setUnreadNotificationCount(0);
+      authService.setStoredUser(null);
       setCurrentUser(null);
       setSessionExpiredNotice('Your session has expired or the token was revoked. Please log in again.');
     });
@@ -103,6 +291,10 @@ export const App: React.FC = () => {
 
   // Handle Logout (Workflow 8)
   const handleLogout = useCallback(async () => {
+    notificationStreamService.disconnect();
+    accountedUnreadIdsRef.current.clear();
+    knownReadIdsRef.current.clear();
+    setUnreadNotificationCount(0);
     try {
       await authService.logout();
     } finally {
@@ -110,6 +302,19 @@ export const App: React.FC = () => {
       setLogoutNotice('You have been logged out successfully. All server tokens and session cookies have been invalidated.');
     }
   }, []);
+
+  // -------------------------------------------------------------
+  // INITIALIZING / SESSION RESTORATION STATE
+  // -------------------------------------------------------------
+  if (isInitializing) {
+    return (
+      <div className="app-container" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center', color: 'var(--color-neutral-600, #4b5563)' }}>
+          <div style={{ fontSize: '1rem', fontWeight: 500 }}>Loading session...</div>
+        </div>
+      </div>
+    );
+  }
 
   // -------------------------------------------------------------
   // UNAUTHENTICATED STATE
@@ -133,6 +338,7 @@ export const App: React.FC = () => {
             onClick={() => {
               setLoginRole('TEACHER');
               setSessionExpiredNotice(null);
+              setStudentAuthMode('login');
             }}
           >
             Faculty Portal
@@ -153,6 +359,7 @@ export const App: React.FC = () => {
             onClick={() => {
               setLoginRole('ADMIN');
               setSessionExpiredNotice(null);
+              setStudentAuthMode('login');
             }}
           >
             Admin Portal
@@ -170,15 +377,36 @@ export const App: React.FC = () => {
             sessionExpiredMessage={sessionExpiredNotice || undefined}
           />
         )}
-        {loginRole === 'STUDENT' && (
+        {loginRole === 'STUDENT' && studentAuthMode === 'login' && (
           <StudentLoginView
             onLoginSuccess={user => {
               setCurrentUser(user as unknown as AuthUser);
               setSessionExpiredNotice(null);
               setLogoutNotice(null);
+              setRegisteredNotice(null);
               setStudentTab('student-appointments');
             }}
             sessionExpiredMessage={sessionExpiredNotice || undefined}
+            registeredSuccessMessage={registeredNotice || undefined}
+            onNavigateToRegister={() => {
+              setRegisteredNotice(null);
+              setSessionExpiredNotice(null);
+              setStudentAuthMode('register');
+            }}
+          />
+        )}
+        {loginRole === 'STUDENT' && studentAuthMode === 'register' && (
+          <StudentRegisterView
+            onRegisterSuccess={user => {
+              setCurrentUser(user as unknown as AuthUser);
+              setSessionExpiredNotice(null);
+              setLogoutNotice(null);
+              setRegisteredNotice(null);
+              setStudentTab('student-appointments');
+            }}
+            onNavigateToLogin={() => {
+              setStudentAuthMode('login');
+            }}
           />
         )}
         {loginRole === 'ADMIN' && (
@@ -230,6 +458,7 @@ export const App: React.FC = () => {
               setTeacherTab(id as TeacherTabId);
             }
           }}
+          unreadNotificationsCount={unreadNotificationCount}
         />
 
         {/* Mobile Navigation Drawer */}
@@ -250,6 +479,7 @@ export const App: React.FC = () => {
               setMobileMenuOpen(false);
             }
           }}
+          unreadNotificationsCount={unreadNotificationCount}
         />
 
         {/* Faculty Workspace Content */}
@@ -275,6 +505,7 @@ export const App: React.FC = () => {
             <TeacherNotificationsView
               userId={currentUser.id}
               onNavigateToRequests={() => setTeacherTab('teacher-pending')}
+              onUnreadCountChange={handleUnreadCountChange}
             />
           )}
 
@@ -336,6 +567,7 @@ export const App: React.FC = () => {
               setStudentTab(id as StudentTabId);
             }
           }}
+          unreadNotificationsCount={unreadNotificationCount}
         />
 
         <MobileNav
@@ -354,6 +586,7 @@ export const App: React.FC = () => {
               setMobileMenuOpen(false);
             }
           }}
+          unreadNotificationsCount={unreadNotificationCount}
         />
 
         <main className="content-wrapper">
@@ -373,6 +606,7 @@ export const App: React.FC = () => {
             <StudentNotificationsView
               userId={currentUser.id}
               onNavigateToAppointments={() => setStudentTab('student-appointments')}
+              onUnreadCountChange={handleUnreadCountChange}
             />
           )}
 
@@ -416,7 +650,13 @@ export const App: React.FC = () => {
         currentRole="ADMIN"
         activeItemId={adminTab}
         onSelectItem={id => {
-          if (id === 'admin-appointments' || id === 'admin-teachers') {
+          if (
+            id === 'admin-appointments' ||
+            id === 'admin-teachers' ||
+            id === 'admin-users' ||
+            id === 'admin-audit' ||
+            id === 'admin-health'
+          ) {
             setAdminTab(id as AdminTabId);
           }
         }}
@@ -428,7 +668,13 @@ export const App: React.FC = () => {
         currentRole="ADMIN"
         activeItemId={adminTab}
         onSelectItem={id => {
-          if (id === 'admin-appointments' || id === 'admin-teachers') {
+          if (
+            id === 'admin-appointments' ||
+            id === 'admin-teachers' ||
+            id === 'admin-users' ||
+            id === 'admin-audit' ||
+            id === 'admin-health'
+          ) {
             setAdminTab(id as AdminTabId);
             setMobileMenuOpen(false);
           }
@@ -438,6 +684,9 @@ export const App: React.FC = () => {
       <main className="content-wrapper">
         {adminTab === 'admin-appointments' && <AppointmentMonitorView />}
         {adminTab === 'admin-teachers' && <TeacherManagementView />}
+        {adminTab === 'admin-users' && <UserAccountsView />}
+        {adminTab === 'admin-audit' && <AuditLogsView />}
+        {adminTab === 'admin-health' && <SystemStatusView />}
       </main>
     </div>
   );

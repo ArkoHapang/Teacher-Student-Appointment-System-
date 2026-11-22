@@ -11,10 +11,11 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { teacherService } from '../../services/teacherService';
-import { TeacherAppointmentItem, TeacherSlotItem } from '../../types/teacher';
+import { TeacherAppointmentItem, TeacherSlotItem, FeedbackFetchState } from '../../types/teacher';
 import { AppointmentHistoryRecord } from '../../types/admin';
 import { Button } from '../../components/Button/Button';
 import { FormField, TextInput, Select } from '../../components/Form/Form';
+import { StarRating, RatingBadge } from '../../components/Rating/StarRating';
 import { Table } from '../../components/Table/Table';
 import { AppointmentStatusBadge } from '../../components/Badge/Badge';
 import { Dialog } from '../../components/Dialog/Dialog';
@@ -55,6 +56,32 @@ export const TeacherScheduleView: React.FC<TeacherScheduleViewProps> = ({
   const [actionSubmitting, setActionSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
+  // Feedback caching state (Phase 5)
+  const [feedbackMap, setFeedbackMap] = useState<Record<number, FeedbackFetchState>>({});
+
+  const loadFeedbackForAppointment = useCallback(async (appointmentId: number) => {
+    setFeedbackMap(prev => ({
+      ...prev,
+      [appointmentId]: { status: 'loading' }
+    }));
+    try {
+      const fb = await teacherService.getFeedback(appointmentId);
+      setFeedbackMap(prev => ({
+        ...prev,
+        [appointmentId]: { status: 'success', data: fb }
+      }));
+    } catch (err: unknown) {
+      const errorObj = err as { message?: string };
+      setFeedbackMap(prev => ({
+        ...prev,
+        [appointmentId]: {
+          status: 'error',
+          error: errorObj.message || 'Failed to retrieve consultation feedback.'
+        }
+      }));
+    }
+  }, []);
+
   const loadSchedule = useCallback(async () => {
     setIsLoading(true);
     setErrorMessage(null);
@@ -73,6 +100,44 @@ export const TeacherScheduleView: React.FC<TeacherScheduleViewProps> = ({
     loadSchedule();
   }, [loadSchedule]);
 
+  // Proactively cache feedback for COMPLETED consultations without duplicate queries
+  useEffect(() => {
+    const completed = appointments.filter(a => a.status === 'COMPLETED');
+    const missing = completed.filter(a => !feedbackMap[a.id]);
+    if (missing.length === 0) return;
+
+    let isSubscribed = true;
+    missing.forEach(a => {
+      setFeedbackMap(prev => ({
+        ...prev,
+        [a.id]: { status: 'loading' }
+      }));
+      teacherService.getFeedback(a.id)
+        .then(fb => {
+          if (!isSubscribed) return;
+          setFeedbackMap(prev => ({
+            ...prev,
+            [a.id]: { status: 'success', data: fb }
+          }));
+        })
+        .catch((err: unknown) => {
+          if (!isSubscribed) return;
+          const errorObj = err as { message?: string };
+          setFeedbackMap(prev => ({
+            ...prev,
+            [a.id]: {
+              status: 'error',
+              error: errorObj.message || 'Failed to retrieve consultation feedback.'
+            }
+          }));
+        });
+    });
+
+    return () => {
+      isSubscribed = false;
+    };
+  }, [appointments, feedbackMap]);
+
   const filteredAppointments = appointments.filter(a => {
     if (filter === 'UPCOMING') return a.status === 'APPROVED';
     if (filter === 'COMPLETED') return a.status === 'COMPLETED';
@@ -86,6 +151,10 @@ export const TeacherScheduleView: React.FC<TeacherScheduleViewProps> = ({
     setActionError(null);
     setHistory([]);
     setHistoryLoading(true);
+
+    if (appt.status === 'COMPLETED' && (!feedbackMap[appt.id] || feedbackMap[appt.id]?.status === 'idle')) {
+      loadFeedbackForAppointment(appt.id);
+    }
 
     try {
       const hist = await teacherService.getAppointmentHistory(appt.id);
@@ -252,19 +321,25 @@ export const TeacherScheduleView: React.FC<TeacherScheduleViewProps> = ({
       key: 'actions',
       header: 'Actions',
       align: 'right',
-      width: '120px',
-      render: row => (
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handleOpenDetails(row)}
-            aria-label={`View details and history for consultation #${row.id}`}
-          >
-            Details
-          </Button>
-        </div>
-      )
+      width: '180px',
+      render: row => {
+        const fbState = feedbackMap[row.id];
+        return (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', alignItems: 'center' }}>
+            {row.status === 'COMPLETED' && fbState?.status === 'success' && fbState.data && (
+              <RatingBadge rating={fbState.data.rating} />
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleOpenDetails(row)}
+              aria-label={`View details and history for consultation #${row.id}`}
+            >
+              Details
+            </Button>
+          </div>
+        );
+      }
     }
   ];
 
@@ -419,6 +494,113 @@ export const TeacherScheduleView: React.FC<TeacherScheduleViewProps> = ({
                 {selectedAppointment.purpose}
               </div>
             </div>
+
+            {/* Student Consultation Feedback Inspection (Only for COMPLETED) */}
+            {selectedAppointment.status === 'COMPLETED' && (
+              <div
+                style={{
+                  borderTop: '1px solid var(--color-border-subtle)',
+                  paddingTop: '14px',
+                  marginBottom: '16px'
+                }}
+              >
+                <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', marginBottom: '8px' }}>
+                  Student Consultation Feedback
+                </div>
+                {(() => {
+                  const fbState = feedbackMap[selectedAppointment.id];
+                  if (!fbState || fbState.status === 'loading') {
+                    return (
+                      <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
+                        Loading feedback record...
+                      </div>
+                    );
+                  }
+                  if (fbState.status === 'error') {
+                    return (
+                      <div
+                        style={{
+                          padding: '12px',
+                          backgroundColor: 'var(--color-danger-50)',
+                          borderRadius: 'var(--radius-sm)',
+                          border: '1px solid var(--color-danger-200)',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          gap: '8px'
+                        }}
+                      >
+                        <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-danger-800)' }}>
+                          <strong>Unable to load feedback:</strong> {fbState.error}
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => loadFeedbackForAppointment(selectedAppointment.id)}
+                        >
+                          Retry
+                        </Button>
+                      </div>
+                    );
+                  }
+                  if (fbState.status === 'success' && fbState.data) {
+                    return (
+                      <div
+                        style={{
+                          padding: '12px',
+                          backgroundColor: 'var(--color-bg-surface-subtle)',
+                          borderRadius: 'var(--radius-sm)',
+                          border: '1px solid var(--color-border-subtle)'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+                          <StarRating value={fbState.data.rating} disabled size={18} />
+                          <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
+                            Submitted on {new Date(fbState.data.createdAt).toLocaleDateString()}
+                          </span>
+                        </div>
+                        {fbState.data.comments ? (
+                          <div
+                            style={{
+                              fontSize: 'var(--font-size-sm)',
+                              backgroundColor: 'var(--color-bg-app)',
+                              padding: '8px 10px',
+                              borderRadius: 'var(--radius-xs)',
+                              color: 'var(--color-text-main)',
+                              whiteSpace: 'pre-wrap'
+                            }}
+                          >
+                            {fbState.data.comments}
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
+                            No written comments provided by student.
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+                  if (fbState.status === 'success' && fbState.data === null) {
+                    return (
+                      <div
+                        style={{
+                          fontSize: 'var(--font-size-xs)',
+                          color: 'var(--color-text-muted)',
+                          fontStyle: 'italic',
+                          padding: '8px 12px',
+                          backgroundColor: 'var(--color-bg-surface-subtle)',
+                          borderRadius: 'var(--radius-sm)',
+                          border: '1px dashed var(--color-border-subtle)'
+                        }}
+                      >
+                        Feedback pending from student
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+              </div>
+            )}
 
             {/* Operational Action Buttons (Only offered when permitted) */}
             {!activeAction && selectedAppointment.status === 'APPROVED' && (

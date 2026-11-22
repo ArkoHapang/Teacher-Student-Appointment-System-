@@ -171,7 +171,7 @@ export const Header: React.FC<HeaderProps> = ({
         {onOpenMobileMenu && (
           <button
             type="button"
-            className="ui-button ui-button--ghost ui-button--sm"
+            className="ui-button ui-button--ghost ui-button--sm ui-header__menu-toggle"
             onClick={onOpenMobileMenu}
             aria-label="Open navigation menu"
             style={{ color: '#FFFFFF', padding: '6px' }}
@@ -230,12 +230,14 @@ export interface RoleNavProps {
   currentRole: UserRole;
   activeItemId: string;
   onSelectItem: (itemId: string) => void;
+  unreadNotificationsCount?: number;
 }
 
 export const RoleNav: React.FC<RoleNavProps> = ({
   currentRole,
   activeItemId,
-  onSelectItem
+  onSelectItem,
+  unreadNotificationsCount
 }) => {
   const config = ROLE_NAVIGATION_CONFIGS[currentRole];
 
@@ -244,6 +246,15 @@ export const RoleNav: React.FC<RoleNavProps> = ({
       <ul className="ui-role-nav__list">
         {config.items.map(item => {
           const isActive = item.id === activeItemId;
+          const isNotificationItem = item.id === 'student-notifications' || item.id === 'teacher-notifications';
+          const dynamicBadge = isNotificationItem
+            ? unreadNotificationsCount && unreadNotificationsCount > 0
+              ? unreadNotificationsCount > 99
+                ? '99+'
+                : unreadNotificationsCount
+              : undefined
+            : item.badge;
+
           return (
             <li key={item.id}>
               <button
@@ -254,8 +265,8 @@ export const RoleNav: React.FC<RoleNavProps> = ({
               >
                 {getNavIcon(item.icon)}
                 <span>{item.label}</span>
-                {item.badge !== undefined && (
-                  <span className="ui-role-nav__badge">{item.badge}</span>
+                {dynamicBadge !== undefined && (
+                  <span className="ui-role-nav__badge">{dynamicBadge}</span>
                 )}
               </button>
             </li>
@@ -272,6 +283,7 @@ export interface MobileNavProps {
   currentRole: UserRole;
   activeItemId: string;
   onSelectItem: (itemId: string) => void;
+  unreadNotificationsCount?: number;
 }
 
 export const MobileNav: React.FC<MobileNavProps> = ({
@@ -279,7 +291,8 @@ export const MobileNav: React.FC<MobileNavProps> = ({
   onClose,
   currentRole,
   activeItemId,
-  onSelectItem
+  onSelectItem,
+  unreadNotificationsCount
 }) => {
   if (!isOpen) return null;
 
@@ -314,6 +327,15 @@ export const MobileNav: React.FC<MobileNavProps> = ({
         <ul className="ui-mobile-nav__list">
           {config.items.map(item => {
             const isActive = item.id === activeItemId;
+            const isNotificationItem = item.id === 'student-notifications' || item.id === 'teacher-notifications';
+            const dynamicBadge = isNotificationItem
+              ? unreadNotificationsCount && unreadNotificationsCount > 0
+                ? unreadNotificationsCount > 99
+                  ? '99+'
+                  : unreadNotificationsCount
+                : undefined
+              : item.badge;
+
             return (
               <li key={item.id}>
                 <button
@@ -328,8 +350,8 @@ export const MobileNav: React.FC<MobileNavProps> = ({
                 >
                   {getNavIcon(item.icon)}
                   <span style={{ flex: 1, textAlign: 'left' }}>{item.label}</span>
-                  {item.badge !== undefined && (
-                    <span className="ui-role-nav__badge">{item.badge}</span>
+                  {dynamicBadge !== undefined && (
+                    <span className="ui-role-nav__badge">{dynamicBadge}</span>
                   )}
                 </button>
               </li>

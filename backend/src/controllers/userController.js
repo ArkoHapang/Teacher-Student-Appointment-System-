@@ -4,6 +4,7 @@
  */
 
 const authService = require('../services/authService');
+const notificationService = require('../services/notificationService');
 const db = require('../config/database');
 const HTTP_STATUS = require('../constants/httpStatusCodes');
 const { AppError } = require('../middlewares/errorHandler');
@@ -105,6 +106,48 @@ const userController = {
           total: notifications.length,
           notifications
         }
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  /**
+   * PATCH /api/v1/users/:id/notifications/:notificationId/read
+   * Mark a single notification as read for the authenticated user.
+   */
+  async markNotificationAsRead(req, res, next) {
+    try {
+      const notificationId = req.params.notificationId;
+      const authenticatedUserId = req.user.id;
+
+      const updated = await notificationService.markAsRead(notificationId, authenticatedUserId);
+
+      return res.status(HTTP_STATUS.OK).json({
+        success: true,
+        message: 'Notification marked as read.',
+        data: updated
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  /**
+   * PATCH /api/v1/users/:id/notifications/read-all
+   * POST /api/v1/users/:id/notifications/mark-all-read
+   * Mark all unread notifications as read for the authenticated user.
+   */
+  async markAllNotificationsAsRead(req, res, next) {
+    try {
+      const authenticatedUserId = req.user.id;
+
+      const result = await notificationService.markAllAsRead(authenticatedUserId);
+
+      return res.status(HTTP_STATUS.OK).json({
+        success: true,
+        message: 'All notifications marked as read.',
+        data: result
       });
     } catch (error) {
       next(error);

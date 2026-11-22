@@ -14,11 +14,15 @@ import { StudentUser } from '../../types/student';
 interface StudentLoginViewProps {
   onLoginSuccess: (user: StudentUser) => void;
   sessionExpiredMessage?: string;
+  onNavigateToRegister?: () => void;
+  registeredSuccessMessage?: string;
 }
 
 export const StudentLoginView: React.FC<StudentLoginViewProps> = ({
   onLoginSuccess,
-  sessionExpiredMessage
+  sessionExpiredMessage,
+  onNavigateToRegister,
+  registeredSuccessMessage
 }) => {
   const [email, setEmail] = useState('alice.carter@student.university.edu');
   const [password, setPassword] = useState('Password123!');
@@ -95,6 +99,14 @@ export const StudentLoginView: React.FC<StudentLoginViewProps> = ({
           </p>
         </div>
 
+        {registeredSuccessMessage && (
+          <div style={{ marginBottom: '16px' }}>
+            <Alert variant="success" title="Registration Completed">
+              {registeredSuccessMessage}
+            </Alert>
+          </div>
+        )}
+
         {errorMessage && (
           <div style={{ marginBottom: '16px' }}>
             <Alert variant="error" title="Sign In Notice">
@@ -153,6 +165,24 @@ export const StudentLoginView: React.FC<StudentLoginViewProps> = ({
             </Button>
           </div>
         </form>
+
+        {onNavigateToRegister && (
+          <div style={{ marginTop: '20px', textAlign: 'center', borderTop: '1px solid var(--color-border-subtle)', paddingTop: '16px' }}>
+            <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-muted)', marginBottom: '8px' }}>
+              Don't have a student account?
+            </p>
+            <Button
+              type="button"
+              variant="secondary"
+              size="md"
+              fullWidth
+              onClick={onNavigateToRegister}
+              disabled={isLoading}
+            >
+              Register New Student Account
+            </Button>
+          </div>
+        )}
 
         <div style={{ marginTop: '20px', padding: '12px', backgroundColor: 'var(--color-bg-surface-subtle)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
           <strong>Demo Student Credentials:</strong><br />

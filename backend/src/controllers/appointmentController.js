@@ -6,6 +6,7 @@
 
 const appointmentService = require('../services/appointmentService');
 const conflictService = require('../services/conflictService');
+const feedbackService = require('../services/feedbackService');
 const HTTP_STATUS = require('../constants/httpStatusCodes');
 
 const appointmentController = {
@@ -205,6 +206,44 @@ const appointmentController = {
         endTimestamp,
         excludeAppointmentId: excludeAppointmentId ? parseInt(excludeAppointmentId, 10) : undefined
       });
+
+      return res.status(HTTP_STATUS.OK).json({
+        success: true,
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  /**
+   * POST /api/v1/appointments/:id/feedback
+   * Submit consultation feedback and rating (Student owner only)
+   */
+  async submitFeedback(req, res, next) {
+    try {
+      const appointmentId = req.params.id;
+      const { rating, comments } = req.body;
+      const result = await feedbackService.submitFeedback(appointmentId, req.user, { rating, comments });
+
+      return res.status(HTTP_STATUS.CREATED).json({
+        success: true,
+        message: 'Consultation feedback submitted successfully.',
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  /**
+   * GET /api/v1/appointments/:id/feedback
+   * Retrieve feedback for an appointment (Student owner, assigned Faculty, or Admin)
+   */
+  async getFeedback(req, res, next) {
+    try {
+      const appointmentId = req.params.id;
+      const result = await feedbackService.getFeedbackByAppointmentId(appointmentId, req.user);
 
       return res.status(HTTP_STATUS.OK).json({
         success: true,

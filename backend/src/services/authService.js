@@ -209,6 +209,180 @@ const authService = {
       createdAt: user.created_at,
       profile: profile || null
     };
+  },
+
+  /**
+   * Public Student Self-Registration
+   * Atomically generates user credentials and student profile within a single transaction.
+   * Enforces strict role containment (STUDENT only) and ACTIVE status.
+   *
+   * @param {Object} data - Registration input
+   * @param {string} ipAddress - Client IP for audit logging
+   * @returns {Promise<Object>} - { user, profile, token, expiresIn }
+   */
+  async registerStudent(data, ipAddress = '127.0.0.1') {
+    const {
+      email,
+      password,
+      firstName,
+      lastName,
+      studentIdNumber,
+      departmentId,
+      batch,
+      phoneNumber
+    } = data || {};
+
+    // 1. Email format and normalization
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!email || typeof email !== 'string' || !emailRegex.test(email.trim())) {
+      throw new AppError('A valid email address is required.', HTTP_STATUS.BAD_REQUEST, 'VALIDATION_ERROR');
+    }
+    const cleanEmail = email.trim().toLowerCase();
+
+    // 2. Name validation
+    if (!firstName || typeof firstName !== 'string' || firstName.trim().length === 0) {
+      throw new AppError('First name is required.', HTTP_STATUS.BAD_REQUEST, 'VALIDATION_ERROR');
+    }
+    if (firstName.trim().length > 100) {
+      throw new AppError('First name cannot exceed 100 characters.', HTTP_STATUS.BAD_REQUEST, 'VALIDATION_ERROR');
+    }
+    if (!lastName || typeof lastName !== 'string' || lastName.trim().length === 0) {
+      throw new AppError('Last name is required.', HTTP_STATUS.BAD_REQUEST, 'VALIDATION_ERROR');
+    }
+    if (lastName.trim().length > 100) {
+      throw new AppError('Last name cannot exceed 100 characters.', HTTP_STATUS.BAD_REQUEST, 'VALIDATION_ERROR');
+    }
+
+    // 3. Student ID Number validation
+    if (!studentIdNumber || typeof studentIdNumber !== 'string' || studentIdNumber.trim().length === 0) {
+      throw new AppError('Student ID number is required.', HTTP_STATUS.BAD_REQUEST, 'VALIDATION_ERROR');
+    }
+    const cleanStudentId = studentIdNumber.trim();
+    if (cleanStudentId.length < 2 || cleanStudentId.length > 50) {
+      throw new AppError('Student ID number must be between 2 and 50 characters.', HTTP_STATUS.BAD_REQUEST, 'VALIDATION_ERROR');
+    }
+
+    // 4. Department ID validation
+    const parsedDeptId = parseInt(departmentId, 10);
+    if (!parsedDeptId || isNaN(parsedDeptId) || parsedDeptId <= 0) {
+      throw new AppError('Valid numeric departmentId is required.', HTTP_STATUS.BAD_REQUEST, 'VALIDATION_ERROR');
+    }
+
+    // 5. Password complexity check
+    if (!password || typeof password !== 'string') {
+      throw new AppError('Password is required.', HTTP_STATUS.BAD_REQUEST, 'VALIDATION_ERROR');
+    }
+    const complexity = passwordService.validateComplexity(password);
+    if (!complexity.isValid) {
+      throw new AppError(complexity.message || 'Password does not meet complexity standards.', HTTP_STATUS.BAD_REQUEST, 'WEAK_PASSWORD');
+    }
+
+    // 6. Secure bcrypt hashing (10 salt rounds)
+    const passwordHash = await passwordService.hashPassword(password);
+
+    // 7. Atomic transaction execution
+    return db.transaction(async (tx) => {
+      // Dynamic lookup of STUDENT role
+      const roleRow = await tx.queryOne("SELECT id, name FROM roles WHERE name = 'STUDENT' LIMIT 1;");
+      if (!roleRow) {
+        throw new AppError('Student role definition missing from database catalog.', HTTP_STATUS.INTERNAL_SERVER_ERROR);
+      }
+
+      // Check duplicate email
+      const existingEmail = await tx.queryOne('SELECT id FROM users WHERE LOWER(email) = ? LIMIT 1;', [cleanEmail]);
+      if (existingEmail) {
+        throw new AppError(`Email address '${cleanEmail}' is already registered.`, HTTP_STATUS.CONFLICT, 'DUPLICATE_EMAIL');
+      }
+
+      // Check duplicate student ID
+      const existingStudentId = await tx.queryOne('SELECT id FROM student_profiles WHERE student_id_number = ? LIMIT 1;', [cleanStudentId]);
+      if (existingStudentId) {
+        throw new AppError(`Student ID number '${cleanStudentId}' is already registered.`, HTTP_STATUS.CONFLICT, 'DUPLICATE_STUDENT_ID');
+      }
+
+      // Verify department exists
+      const department = await tx.queryOne('SELECT id, code, name FROM departments WHERE id = ? LIMIT 1;', [parsedDeptId]);
+      if (!department) {
+        throw new AppError(`Department #${parsedDeptId} does not exist.`, HTTP_STATUS.BAD_REQUEST, 'DEPARTMENT_NOT_FOUND');
+      }
+
+      // Insert User record (strictly STUDENT role and ACTIVE status)
+      const userResult = await tx.execute(
+        `INSERT INTO users (role_id, email, password_hash, first_name, last_name, status)
+         VALUES (?, ?, ?, ?, ?, ?);`,
+        [roleRow.id, cleanEmail, passwordHash, firstName.trim(), lastName.trim(), USER_STATUS.ACTIVE]
+      );
+
+      const userId = userResult.lastInsertRowid || (await tx.queryOne('SELECT id FROM users WHERE LOWER(email) = ?;', [cleanEmail])).id;
+
+      // Insert Student Profile record
+      const cleanPhone = phoneNumber && typeof phoneNumber === 'string' && phoneNumber.trim().length > 0
+        ? phoneNumber.trim().slice(0, 25)
+        : null;
+      const cleanBatch = batch && typeof batch === 'string' && batch.trim().length > 0
+        ? batch.trim().slice(0, 30)
+        : null;
+
+      const profileResult = await tx.execute(
+        `INSERT INTO student_profiles (user_id, student_id_number, department_id, phone_number, batch)
+         VALUES (?, ?, ?, ?, ?);`,
+        [userId, cleanStudentId, department.id, cleanPhone, cleanBatch]
+      );
+
+      const profileId = profileResult.lastInsertRowid || (await tx.queryOne('SELECT id FROM student_profiles WHERE user_id = ?;', [userId])).id;
+
+      // Record audit log
+      try {
+        await tx.execute(
+          `INSERT INTO audit_logs (actor_id, action, entity_type, entity_id, details, ip_address)
+           VALUES (?, 'AUTH_REGISTER', 'USER', ?, ?, ?);`,
+          [
+            userId,
+            String(userId),
+            JSON.stringify({
+              role: 'STUDENT',
+              email: cleanEmail,
+              studentIdNumber: cleanStudentId,
+              departmentCode: department.code
+            }),
+            ipAddress
+          ]
+        );
+      } catch (auditErr) {
+        logger.warn(`[Auth] Failed to write audit log on student registration: ${auditErr.message}`);
+      }
+
+      // Generate signed access token for immediate authentication
+      const token = tokenService.generateAccessToken({
+        id: userId,
+        email: cleanEmail,
+        role: 'STUDENT',
+        status: USER_STATUS.ACTIVE
+      });
+
+      return {
+        user: {
+          id: userId,
+          email: cleanEmail,
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          role: 'STUDENT',
+          status: USER_STATUS.ACTIVE
+        },
+        profile: {
+          id: profileId,
+          userId,
+          studentIdNumber: cleanStudentId,
+          departmentId: department.id,
+          departmentCode: department.code,
+          departmentName: department.name,
+          batch: cleanBatch,
+          phoneNumber: cleanPhone
+        },
+        token,
+        expiresIn: env.jwt.expiresIn
+      };
+    });
   }
 };
 

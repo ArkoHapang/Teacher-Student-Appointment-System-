@@ -12,6 +12,7 @@
  * 9. Server-enforced RBAC restrictions (cannot manage other teachers or access admin endpoints)
  */
 
+require('./setup');
 const assert = require('assert');
 const http = require('http');
 const app = require('../src/app');

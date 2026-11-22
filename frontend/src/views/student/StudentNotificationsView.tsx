@@ -6,26 +6,31 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { studentService } from '../../services/studentService';
 import { StudentNotificationItem } from '../../types/student';
+import { notificationStreamService, RealtimeNotificationPayload } from '../../services/notificationStreamService';
 import { Button } from '../../components/Button/Button';
 import { Badge } from '../../components/Badge/Badge';
 import { BadgeVariant } from '../../types/designSystem';
 import { Alert } from '../../components/Alert/Alert';
 import { LoadingState, EmptyState, ErrorState } from '../../components/Feedback/Feedback';
-import { CalendarIcon, InfoIcon } from '../../components/Icons/Icons';
+import { CalendarIcon, InfoIcon, CheckIcon } from '../../components/Icons/Icons';
 
 interface StudentNotificationsViewProps {
   userId: number;
   onNavigateToAppointments?: () => void;
+  onUnreadCountChange?: (count: number, readNotificationId?: number) => void;
 }
 
 export const StudentNotificationsView: React.FC<StudentNotificationsViewProps> = ({
   userId,
-  onNavigateToAppointments
+  onNavigateToAppointments,
+  onUnreadCountChange
 }) => {
   const [notifications, setNotifications] = useState<StudentNotificationItem[]>([]);
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [pendingActionIds, setPendingActionIds] = useState<Set<number>>(new Set());
+  const [isMarkingAll, setIsMarkingAll] = useState(false);
 
   const loadNotifications = useCallback(async () => {
     setIsLoading(true);
@@ -33,17 +38,52 @@ export const StudentNotificationsView: React.FC<StudentNotificationsViewProps> =
     try {
       const data = await studentService.getNotifications(userId);
       setNotifications(data);
+      if (onUnreadCountChange) {
+        onUnreadCountChange(data.filter(n => !n.isRead).length);
+      }
     } catch (err: unknown) {
       const errorObj = err as { message?: string };
       setErrorMessage(errorObj.message || 'Failed to retrieve notification records.');
     } finally {
       setIsLoading(false);
     }
-  }, [userId]);
+  }, [userId, onUnreadCountChange]);
 
   useEffect(() => {
     loadNotifications();
   }, [loadNotifications]);
+
+  // Subscribe to shared real-time SSE stream
+  useEffect(() => {
+    const unsubscribe = notificationStreamService.onNotification((incoming: RealtimeNotificationPayload) => {
+      if (incoming.recipientId !== userId) return;
+
+      setNotifications(prev => {
+        if (prev.some(n => n.id === incoming.id)) {
+          return prev;
+        }
+        const item: StudentNotificationItem = {
+          id: incoming.id,
+          recipientId: incoming.recipientId,
+          appointmentId: incoming.appointmentId ?? undefined,
+          title: incoming.title,
+          message: incoming.message,
+          type: incoming.type,
+          isRead: incoming.isRead,
+          createdAt: incoming.createdAt || new Date().toISOString()
+        };
+        const updated = [item, ...prev];
+        if (onUnreadCountChange) {
+          onUnreadCountChange(updated.filter(n => !n.isRead).length);
+        }
+        return updated;
+      });
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [userId, onUnreadCountChange]);
 
   const filteredNotifications = notifications.filter(n => {
     if (filter === 'unread') {
@@ -79,6 +119,52 @@ export const StudentNotificationsView: React.FC<StudentNotificationsViewProps> =
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
+  const handleMarkAsRead = async (notificationId: number) => {
+    if (pendingActionIds.has(notificationId)) return;
+    setPendingActionIds(prev => new Set(prev).add(notificationId));
+    setErrorMessage(null);
+    try {
+      await studentService.markNotificationAsRead(userId, notificationId);
+      setNotifications(prev => {
+        const updated = prev.map(n => (n.id === notificationId ? { ...n, isRead: 1 } : n));
+        if (onUnreadCountChange) {
+          onUnreadCountChange(updated.filter(n => !n.isRead).length, notificationId);
+        }
+        return updated;
+      });
+    } catch (err: unknown) {
+      const errorObj = err as { message?: string };
+      setErrorMessage(errorObj.message || 'Failed to mark notification as read.');
+    } finally {
+      setPendingActionIds(prev => {
+        const next = new Set(prev);
+        next.delete(notificationId);
+        return next;
+      });
+    }
+  };
+
+  const handleMarkAllAsRead = async () => {
+    if (isMarkingAll || unreadCount === 0) return;
+    setIsMarkingAll(true);
+    setErrorMessage(null);
+    try {
+      await studentService.markAllNotificationsAsRead(userId);
+      setNotifications(prev => {
+        const updated = prev.map(n => (n.isRead ? n : { ...n, isRead: 1 }));
+        if (onUnreadCountChange) {
+          onUnreadCountChange(0);
+        }
+        return updated;
+      });
+    } catch (err: unknown) {
+      const errorObj = err as { message?: string };
+      setErrorMessage(errorObj.message || 'Failed to mark all notifications as read.');
+    } finally {
+      setIsMarkingAll(false);
+    }
+  };
+
   return (
     <div style={{ maxWidth: '800px', margin: '0 auto' }}>
       {/* Page Header */}
@@ -91,14 +177,28 @@ export const StudentNotificationsView: React.FC<StudentNotificationsViewProps> =
             Stay informed on appointment confirmations, schedule changes, and departmental announcements.
           </p>
         </div>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={loadNotifications}
-          disabled={isLoading}
-        >
-          Refresh
-        </Button>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {unreadCount > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              leadingIcon={<CheckIcon size={14} />}
+              onClick={handleMarkAllAsRead}
+              disabled={isMarkingAll || isLoading}
+              isLoading={isMarkingAll}
+            >
+              Mark All as Read
+            </Button>
+          )}
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={loadNotifications}
+            disabled={isLoading || isMarkingAll}
+          >
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {errorMessage && (
@@ -210,8 +310,8 @@ export const StudentNotificationsView: React.FC<StudentNotificationsViewProps> =
                 {item.message}
               </p>
 
-              {item.appointmentId && onNavigateToAppointments && (
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '8px', marginTop: '4px', flexWrap: 'wrap' }}>
+                {item.appointmentId && onNavigateToAppointments && (
                   <Button
                     variant="ghost"
                     size="sm"
@@ -220,8 +320,20 @@ export const StudentNotificationsView: React.FC<StudentNotificationsViewProps> =
                   >
                     View Related Appointment
                   </Button>
-                </div>
-              )}
+                )}
+                {!item.isRead && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    leadingIcon={<CheckIcon size={14} />}
+                    onClick={() => handleMarkAsRead(item.id)}
+                    disabled={pendingActionIds.has(item.id) || isMarkingAll}
+                    isLoading={pendingActionIds.has(item.id)}
+                  >
+                    Mark as read
+                  </Button>
+                )}
+              </div>
             </div>
           ))}
         </div>

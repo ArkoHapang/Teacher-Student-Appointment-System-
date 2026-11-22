@@ -1,0 +1,3270 @@
+openapi: 3.0.3
+info:
+  title: University Teacher-Student Appointment System API
+  version: 1.0.0
+  description: |
+    Comprehensive OpenAPI 3.0.3 specification for the University Teacher–Student Appointment System.
+    Provides complete documentation for student consultation scheduling, teacher availability management,
+    appointment lifecycle state transitions, conflict prevention, real-time Server-Sent Events (SSE) notifications,
+    post-consultation feedback ratings, and administrative audit logging.
+
+    ### Architecture & Deployment
+    Unified full-stack Express & SQLite/PostgreSQL service deployed via Docker container on Render / Cloud hosting.
+    All API endpoints are mounted under the `/api/v1` namespace.
+
+    ### Authentication Mechanisms
+    1. **HttpOnly Cookie Authentication**:
+       Session cookie named `token` set by server upon successful login (`/api/v1/auth/login`) or registration (`/api/v1/auth/register`).
+       The browser automatically delivers this cookie on same-origin requests (`withCredentials: true`).
+    2. **Bearer JWT Header**:
+       Standard `Authorization: Bearer <jwt-token>` header for programmatic API consumers and non-browser clients.
+
+    ### Anti-CSRF Protection
+    For browser clients utilizing cookie-based authentication, all state-changing HTTP operations
+    (`POST`, `PUT`, `PATCH`, `DELETE`) strictly require:
+    - Custom Header: `X-Requested-With: XMLHttpRequest`
+    - Valid `Origin` header matching trusted deployment origins.
+servers:
+  - url: /
+    description: Current Host (Unified Production / Render Deployment)
+  - url: http://localhost:5000
+    description: Local Development Server
+
+tags:
+  - name: System
+    description: Liveness, readiness, and API catalog diagnostic endpoints
+  - name: Authentication
+    description: User registration, credential login, token revocation, identity inspection, and session verification
+  - name: Departments
+    description: Academic department listings and directory
+  - name: Users
+    description: User account profile management and notification read state operations
+  - name: Teachers
+    description: Faculty directory exploration, availability slot configuration, and schedule management
+  - name: Appointments
+    description: Consultation booking, status lifecycle transitions, conflict checking, and history
+  - name: Feedback
+    description: Student post-consultation ratings and reviews
+  - name: Notifications
+    description: Real-time Server-Sent Events (SSE) notification streaming
+  - name: Administration
+    description: Administrative user management, teacher approval, system audit logs, and appointment oversight
+
+paths:
+  /api/v1/:
+    get:
+      tags: [System]
+      summary: API Root Catalog
+      description: Returns service metadata, current timestamp, and available API module entry points.
+      operationId: getApiCatalog
+      responses:
+        '200':
+          description: API catalog metadata returned successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiCatalogResponse'
+
+  /api/v1/health:
+    get:
+      tags: [System]
+      summary: Liveness Probe
+      description: Basic healthcheck endpoint returning process uptime, memory usage, and server timestamp.
+      operationId: getHealthStatus
+      responses:
+        '200':
+          description: Service is healthy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthCheckResponse'
+
+  /api/v1/ready:
+    get:
+      tags: [System]
+      summary: Readiness Probe
+      description: Deep healthcheck verifying database connectivity and migration status.
+      operationId: getReadinessStatus
+      responses:
+        '200':
+          description: Database and application subsystems are ready to accept traffic.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableError'
+
+  /api/v1/auth/register:
+    post:
+      tags: [Authentication]
+      summary: Student Self-Registration
+      description: Atomically creates a user account with STUDENT role and an associated student profile. Sets secure HttpOnly session cookie (`token`).
+      operationId: registerStudent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterStudentRequest'
+      responses:
+        '201':
+          description: Student registration successful.
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SetCookieAuth'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '409':
+          description: Conflict — User email or student ID number already registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
+
+  /api/v1/auth/login:
+    post:
+      tags: [Authentication]
+      summary: User Login
+      description: Authenticates user credentials (email and password), returning a JWT access token and setting a secure HttpOnly session cookie (`token`).
+      operationId: loginUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful.
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SetCookieAuth'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          description: Forbidden — Account is suspended or pending administrator approval.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Authentication]
+      summary: User Logout (POST)
+      description: Revokes JWT access token server-side in `revoked_tokens` table, wipes session cookies, and emits storage-clearing headers.
+      operationId: logoutUserPost
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/csrfHeader'
+      responses:
+        '200':
+          description: Successfully logged out.
+          headers:
+            Clear-Site-Data:
+              schema:
+                type: string
+                example: '"cache", "cookies", "storage"'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogoutResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+    get:
+      tags: [Authentication]
+      summary: User Logout (GET)
+      description: Allows logout via browser navigation redirect or JSON response.
+      operationId: logoutUserGet
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: redirect
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: When true, redirects browser (302) to `/login`.
+      responses:
+        '200':
+          description: Successfully logged out.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogoutResponse'
+        '302':
+          description: Redirected to login page.
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v1/auth/me:
+    get:
+      tags: [Authentication]
+      summary: Current User Profile
+      description: Returns identity, role, and associated profile record (student or teacher) of the currently authenticated user.
+      operationId: getCurrentUserProfile
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current authenticated user identity profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfileResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v1/auth/verify:
+    get:
+      tags: [Authentication]
+      summary: Verify Session Token
+      description: Confirms that the current authentication token or session cookie is valid and active.
+      operationId: verifyAuthenticationState
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Token is valid.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      valid:
+                        type: boolean
+                        example: true
+                      user:
+                        $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v1/departments:
+    get:
+      tags: [Departments]
+      summary: List Academic Departments
+      description: Public directory of university departments.
+      operationId: listDepartments
+      responses:
+        '200':
+          description: List of academic departments.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepartmentListResponse'
+
+  /api/v1/users/{id}:
+    get:
+      tags: [Users]
+      summary: Get User Profile by ID
+      description: Retrieves basic user profile fields. Restricted to the user themselves or an administrator.
+      operationId: getUserProfile
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/userIdParam'
+      responses:
+        '200':
+          description: User profile details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfileResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    patch:
+      tags: [Users]
+      summary: Update User Profile
+      description: Updates editable user account fields (`firstName`, `lastName`). Restricted to the user themselves or an administrator.
+      operationId: updateUserProfile
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/userIdParam'
+        - $ref: '#/components/parameters/csrfHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserProfileRequest'
+      responses:
+        '200':
+          description: User profile successfully updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfileResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/users/{id}/notifications:
+    get:
+      tags: [Users]
+      summary: List User Notifications
+      description: Retrieves persistent in-app notifications for the specified user. Restricted to the user themselves or an administrator.
+      operationId: getUserNotifications
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/userIdParam'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+        - name: unreadOnly
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Paginated notification list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/v1/users/{id}/notifications/read-all:
+    patch:
+      tags: [Users]
+      summary: Mark All Notifications as Read (PATCH)
+      description: Idempotently marks all unread notifications as read for the authenticated recipient user.
+      operationId: markAllNotificationsReadPatch
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/userIdParam'
+        - $ref: '#/components/parameters/csrfHeader'
+      responses:
+        '200':
+          description: All notifications marked as read.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarkAllNotificationsResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/v1/users/{id}/notifications/mark-all-read:
+    post:
+      tags: [Users]
+      summary: Mark All Notifications as Read (POST Alias)
+      description: Alias endpoint to idempotently mark all notifications as read.
+      operationId: markAllNotificationsReadPost
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/userIdParam'
+        - $ref: '#/components/parameters/csrfHeader'
+      responses:
+        '200':
+          description: All notifications marked as read.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarkAllNotificationsResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/v1/users/{id}/notifications/{notificationId}/read:
+    patch:
+      tags: [Users]
+      summary: Mark Notification as Read
+      description: Idempotently marks a single notification as read. Enforces strict recipient ownership matching authenticated user ID.
+      operationId: markNotificationRead
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/userIdParam'
+        - $ref: '#/components/parameters/notificationIdParam'
+        - $ref: '#/components/parameters/csrfHeader'
+      responses:
+        '200':
+          description: Notification marked as read.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/users/{id}/notifications/{notificationId}:
+    patch:
+      tags: [Users]
+      summary: Mark Notification as Read (Alias)
+      description: Alias endpoint to mark an individual notification as read.
+      operationId: markNotificationReadAlias
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/userIdParam'
+        - $ref: '#/components/parameters/notificationIdParam'
+        - $ref: '#/components/parameters/csrfHeader'
+      responses:
+        '200':
+          description: Notification marked as read.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/teachers:
+    get:
+      tags: [Teachers]
+      summary: List Faculty Directory
+      description: Public directory of university faculty members with department filters, search, and pagination.
+      operationId: listTeachersDirectory
+      parameters:
+        - name: departmentId
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Filter faculty by department ID
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Search by teacher name or email
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: List of faculty members.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeacherListResponse'
+
+  /api/v1/teachers/{id}:
+    get:
+      tags: [Teachers]
+      summary: Get Teacher Details
+      description: Retrieves comprehensive teacher profile including department, office room, bio, and assigned courses.
+      operationId: getTeacherDetails
+      parameters:
+        - $ref: '#/components/parameters/teacherIdParam'
+      responses:
+        '200':
+          description: Teacher details returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeacherDetailResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    patch:
+      tags: [Teachers]
+      summary: Update Teacher Profile
+      description: Allows a faculty member to update their own professional profile fields (`designation`, `officeRoom`, `bio`).
+      operationId: updateTeacherProfile
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/teacherIdParam'
+        - $ref: '#/components/parameters/csrfHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTeacherProfileRequest'
+      responses:
+        '200':
+          description: Teacher profile updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeacherDetailResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/teachers/{id}/slots:
+    get:
+      tags: [Teachers]
+      summary: Get Faculty Availability Slots
+      description: Publicly lists availability slots for a faculty member. By default returns future open slots (`is_available = 1`).
+      operationId: getTeacherAvailabilitySlots
+      parameters:
+        - $ref: '#/components/parameters/teacherIdParam'
+        - name: all
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: When true, returns all slots regardless of availability
+        - name: startDate
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: Filter slots starting on or after YYYY-MM-DD
+      responses:
+        '200':
+          description: Availability slots returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SlotListResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    post:
+      tags: [Teachers]
+      summary: Create Availability Slot
+      description: Creates a new consultation availability slot for a teacher. Checks for overlapping intervals on the same date.
+      operationId: createTeacherAvailabilitySlot
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/teacherIdParam'
+        - $ref: '#/components/parameters/csrfHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAvailabilitySlotRequest'
+      responses:
+        '201':
+          description: Availability slot created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SlotResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: Conflict — Slot time interval collides with existing slot.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/teachers/{id}/slots/{slotId}:
+    patch:
+      tags: [Teachers]
+      summary: Update Availability Slot Status
+      description: Toggles availability slot active status (`isActive: true|false`). Restricted to slot owner or admin.
+      operationId: updateTeacherAvailabilitySlot
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/teacherIdParam'
+        - $ref: '#/components/parameters/slotIdParam'
+        - $ref: '#/components/parameters/csrfHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAvailabilitySlotRequest'
+      responses:
+        '200':
+          description: Slot updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SlotResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    delete:
+      tags: [Teachers]
+      summary: Delete Availability Slot
+      description: Permanently removes an open availability slot. Fails if reserved by an active appointment.
+      operationId: deleteTeacherAvailabilitySlot
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/teacherIdParam'
+        - $ref: '#/components/parameters/slotIdParam'
+        - $ref: '#/components/parameters/csrfHeader'
+      responses:
+        '200':
+          description: Slot deleted successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Slot deleted successfully.
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: Conflict — Slot cannot be deleted because it is reserved by an active consultation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/appointments/check-conflict:
+    post:
+      tags: [Appointments]
+      summary: Check Booking Conflict
+      description: Evaluates whether a proposed availability slot is open and verifies student and teacher have no overlapping appointments.
+      operationId: checkAppointmentConflict
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/csrfHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckConflictRequest'
+      responses:
+        '200':
+          description: Conflict check completed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckConflictResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/v1/appointments:
+    get:
+      tags: [Appointments]
+      summary: List User Appointments
+      description: Returns scoped appointments for the authenticated user (students see booked consultations, faculty members see incoming requests, admins see all).
+      operationId: listAppointments
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [PENDING, APPROVED, REJECTED, CANCELLED, COMPLETED, RESCHEDULE_PENDING]
+        - name: studentId
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Admin filter by student ID
+        - name: teacherId
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Admin filter by teacher ID
+      responses:
+        '200':
+          description: Appointments list returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+    post:
+      tags: [Appointments]
+      summary: Book Appointment
+      description: Authenticated student books an open faculty consultation slot. Sets status to PENDING and marks slot unavailable.
+      operationId: bookAppointment
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/csrfHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAppointmentRequest'
+      responses:
+        '201':
+          description: Consultation appointment booked successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          description: Forbidden — Only authenticated students can book consultations.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: Conflict — Slot is already booked or student has a concurrent appointment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/appointments/{id}:
+    get:
+      tags: [Appointments]
+      summary: Get Appointment Details
+      description: Retrieves complete appointment details including participant identities, slot timestamps, and current lifecycle status.
+      operationId: getAppointmentDetails
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/appointmentIdParam'
+      responses:
+        '200':
+          description: Appointment details returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/appointments/{id}/approve:
+    post:
+      tags: [Appointments]
+      summary: Approve Appointment
+      description: Assigned faculty member or admin approves a PENDING appointment (`PENDING -> APPROVED`).
+      operationId: approveAppointment
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/appointmentIdParam'
+        - $ref: '#/components/parameters/csrfHeader'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApproveAppointmentRequest'
+      responses:
+        '200':
+          description: Appointment approved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentResponse'
+        '400':
+          description: Bad Request — Invalid lifecycle transition.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/appointments/{id}/reject:
+    post:
+      tags: [Appointments]
+      summary: Reject Appointment
+      description: Assigned faculty member or admin rejects an appointment (`PENDING -> REJECTED`). Releases the reserved slot.
+      operationId: rejectAppointment
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/appointmentIdParam'
+        - $ref: '#/components/parameters/csrfHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RejectAppointmentRequest'
+      responses:
+        '200':
+          description: Appointment rejected and slot released.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/appointments/{id}/cancel:
+    post:
+      tags: [Appointments]
+      summary: Cancel Appointment
+      description: Cancels an appointment and releases slot. Allowed for student owner, teacher owner, or administrator.
+      operationId: cancelAppointment
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/appointmentIdParam'
+        - $ref: '#/components/parameters/csrfHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelAppointmentRequest'
+      responses:
+        '200':
+          description: Appointment cancelled and slot released.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentResponse'
+        '400':
+          description: Bad Request — Cannot cancel terminal COMPLETED or CANCELLED consultations.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/appointments/{id}/reschedule:
+    post:
+      tags: [Appointments]
+      summary: Reschedule Appointment
+      description: Transfers consultation into a new open availability slot with atomic release of the previous slot.
+      operationId: rescheduleAppointment
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/appointmentIdParam'
+        - $ref: '#/components/parameters/csrfHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RescheduleAppointmentRequest'
+      responses:
+        '200':
+          description: Appointment rescheduled successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: Conflict — Target slot is unavailable or collides with another booking.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/appointments/{id}/complete:
+    post:
+      tags: [Appointments]
+      summary: Complete Appointment
+      description: Assigned faculty member or admin marks an APPROVED appointment as COMPLETED. Terminal state.
+      operationId: completeAppointment
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/appointmentIdParam'
+        - $ref: '#/components/parameters/csrfHeader'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteAppointmentRequest'
+      responses:
+        '200':
+          description: Consultation marked as completed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentResponse'
+        '400':
+          description: Bad Request — Cannot complete an unapproved or cancelled appointment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/appointments/{id}/history:
+    get:
+      tags: [Appointments]
+      summary: Get Appointment Audit History
+      description: Chronological ledger of all state transitions, notes, and actions for this consultation.
+      operationId: getAppointmentHistory
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/appointmentIdParam'
+      responses:
+        '200':
+          description: Chronological appointment history.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentHistoryResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/appointments/{id}/feedback:
+    post:
+      tags: [Feedback]
+      summary: Submit Consultation Feedback
+      description: Authenticated student who booked the consultation submits post-meeting rating (1-5) and comments. Must be in COMPLETED state. Exactly one feedback per consultation.
+      operationId: submitAppointmentFeedback
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/appointmentIdParam'
+        - $ref: '#/components/parameters/csrfHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitFeedbackRequest'
+      responses:
+        '201':
+          description: Consultation feedback recorded successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackResponse'
+        '400':
+          description: Bad Request — Non-integer rating, out of range 1-5, comment exceeds 1000 characters, or consultation is not COMPLETED.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          description: Forbidden — User is not the student who participated in this consultation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: Conflict — Feedback has already been submitted for this consultation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+    get:
+      tags: [Feedback]
+      summary: Get Consultation Feedback
+      description: Retrieves submitted feedback for an appointment. Permitted for owning student, assigned teacher, or administrator. Returns null data if no feedback submitted yet.
+      operationId: getAppointmentFeedback
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/appointmentIdParam'
+      responses:
+        '200':
+          description: Feedback data (or null if none exists).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackQueryResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/notifications/stream:
+    get:
+      tags: [Notifications]
+      summary: Real-Time SSE Notification Stream
+      description: |
+        Establishes an authenticated Server-Sent Events (SSE) notification stream.
+        Maintains a persistent HTTP connection (`Connection: keep-alive`) sending text/event-stream data frames.
+
+        ### Protocol Lifecycle
+        1. **Handshake**: Server transmits `event: connected` payload with user ID and timestamp upon connection establishment.
+        2. **Notification Events**: When notifications are generated for the authenticated user, server pushes `event: notification` with serialized JSON payload.
+        3. **Heartbeat Keep-Alive**: Periodically transmits comment frames (`:keepalive\n\n`) every 25 seconds to prevent browser/proxy timeouts.
+        4. **Connection Isolation**: Strictly scoped to the authenticated user's ID; foreign notifications are never multiplexed.
+      operationId: streamRealtimeNotifications
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Real-time event stream active.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                example: |
+                  event: connected
+                  data: {"connected":true,"userId":6,"timestamp":"2026-11-11T12:00:00.000Z"}
+
+                  :keepalive
+
+                  id: 105
+                  event: notification
+                  data: {"id":105,"recipientId":6,"appointmentId":42,"title":"Appointment Approved","message":"Consultation approved.","type":"STATUS_UPDATE","isRead":0}
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v1/admin/users:
+    get:
+      tags: [Administration]
+      summary: List All System Users
+      description: Returns all registered accounts across all roles (STUDENT, TEACHER, ADMIN) with their active/suspended status.
+      operationId: adminListUsers
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Complete user registry.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUserListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/v1/admin/users/{id}/status:
+    patch:
+      tags: [Administration]
+      summary: Update User Account Status
+      description: Sets a user account status to `ACTIVE`, `PENDING_APPROVAL`, or `SUSPENDED`.
+      operationId: adminUpdateUserStatus
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/userIdParam'
+        - $ref: '#/components/parameters/csrfHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminUpdateUserStatusRequest'
+      responses:
+        '200':
+          description: User status updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: User status updated to SUSPENDED.
+                  data:
+                    type: object
+                    properties:
+                      userId:
+                        type: integer
+                        example: 6
+                      status:
+                        type: string
+                        example: SUSPENDED
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/admin/teachers:
+    get:
+      tags: [Administration]
+      summary: Paginated Faculty Administration Directory
+      description: Comprehensive faculty list with appointment counters, course statistics, multi-criteria filters, and sorting.
+      operationId: adminListTeachers
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 10
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [ACTIVE, PENDING_APPROVAL, SUSPENDED]
+        - name: departmentId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: isVerified
+          in: query
+          required: false
+          schema:
+            type: integer
+            enum: [0, 1]
+        - name: sortBy
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [created_at, name, email, department, status, designation]
+            default: created_at
+        - name: sortOrder
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [ASC, DESC]
+            default: DESC
+      responses:
+        '200':
+          description: Paginated teacher administration records.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminTeacherListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+    post:
+      tags: [Administration]
+      summary: Create Faculty Account & Profile
+      description: Administrator creates a new teacher user account, faculty profile, and course assignments.
+      operationId: adminCreateTeacher
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/csrfHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminCreateTeacherRequest'
+      responses:
+        '201':
+          description: Teacher account created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminTeacherDetailResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '409':
+          description: Conflict — User email already registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/admin/teachers/{id}:
+    get:
+      tags: [Administration]
+      summary: Get Faculty Record by ID
+      description: Comprehensive admin view of teacher profile, user account details, and course offerings.
+      operationId: adminGetTeacher
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/teacherIdParam'
+      responses:
+        '200':
+          description: Teacher details returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminTeacherDetailResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    patch:
+      tags: [Administration]
+      summary: Update Faculty Record
+      description: Administrator modifies faculty details including user names, email, department, designation, and bio. Role modification is strictly rejected.
+      operationId: adminUpdateTeacher
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/teacherIdParam'
+        - $ref: '#/components/parameters/csrfHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminUpdateTeacherRequest'
+      responses:
+        '200':
+          description: Teacher record updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminTeacherDetailResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/admin/teachers/{id}/status:
+    patch:
+      tags: [Administration]
+      summary: Update Faculty Account Status
+      description: Modifies teacher status (`ACTIVE`, `PENDING_APPROVAL`, `SUSPENDED`). When suspending, optionally cancels active upcoming appointments with slot release.
+      operationId: adminUpdateTeacherStatus
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/teacherIdParam'
+        - $ref: '#/components/parameters/csrfHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminUpdateTeacherStatusRequest'
+      responses:
+        '200':
+          description: Faculty status updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Teacher status updated to SUSPENDED.
+                  data:
+                    type: object
+                    properties:
+                      teacherId:
+                        type: integer
+                        example: 2
+                      status:
+                        type: string
+                        example: SUSPENDED
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/admin/teachers/{id}/verify:
+    patch:
+      tags: [Administration]
+      summary: Verify Faculty Profile
+      description: Sets faculty profile verification badge (`isVerified: 1` or `0`). Records audit ledger entry.
+      operationId: adminVerifyTeacher
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/teacherIdParam'
+        - $ref: '#/components/parameters/csrfHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [isVerified]
+              properties:
+                isVerified:
+                  type: integer
+                  enum: [0, 1]
+                  example: 1
+      responses:
+        '200':
+          description: Teacher verification updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Teacher profile verified successfully.
+                  data:
+                    type: object
+                    properties:
+                      teacherId:
+                        type: integer
+                        example: 1
+                      isVerified:
+                        type: integer
+                        example: 1
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/admin/audit-logs:
+    get:
+      tags: [Administration]
+      summary: System Audit Logs
+      description: Returns immutable ledger of administrative security actions, status transitions, and user modifications.
+      operationId: adminGetAuditLogs
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Audit logs returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLogListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/v1/admin/appointments/summary:
+    get:
+      tags: [Administration]
+      summary: Aggregated Appointment Metrics Summary
+      description: Returns real-time database aggregation of appointments grouped by lifecycle status.
+      operationId: adminGetAppointmentSummary
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Appointment metrics summary.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentSummaryResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/v1/admin/appointments:
+    get:
+      tags: [Administration]
+      summary: Paginated Administrative Appointment Monitor
+      description: Full institutional consultation directory supporting multi-criteria filtering by status, participants, department, date range, search, and sorting.
+      operationId: adminListAppointments
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 10
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [PENDING, APPROVED, REJECTED, CANCELLED, COMPLETED, RESCHEDULE_PENDING]
+        - name: teacherId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: studentId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: departmentId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: startDate
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: endDate
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: sortBy
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [created_at, date, status, title, student_name, teacher_name]
+            default: created_at
+        - name: sortOrder
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [ASC, DESC]
+            default: DESC
+      responses:
+        '200':
+          description: Paginated appointments list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminAppointmentListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/v1/admin/appointments/{id}:
+    get:
+      tags: [Administration]
+      summary: Get Administrative Appointment Record
+      description: Returns full appointment details with participants, slot data, history, and feedback.
+      operationId: adminGetAppointment
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/appointmentIdParam'
+      responses:
+        '200':
+          description: Appointment record details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    patch:
+      tags: [Administration]
+      summary: Update Appointment Metadata
+      description: Updates non-lifecycle consultation metadata (`title`, `purpose`). Participant reassignment, slot shifts, and status changes are denied.
+      operationId: adminUpdateAppointmentMetadata
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/appointmentIdParam'
+        - $ref: '#/components/parameters/csrfHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminUpdateAppointmentMetadataRequest'
+      responses:
+        '200':
+          description: Metadata updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/admin/appointments/{id}/history:
+    get:
+      tags: [Administration]
+      summary: Get Appointment Transition History
+      description: Complete chronological audit history of status changes and guidance notes for an appointment.
+      operationId: adminGetAppointmentHistory
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/appointmentIdParam'
+      responses:
+        '200':
+          description: Appointment history returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentHistoryResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/admin/appointments/{id}/status:
+    patch:
+      tags: [Administration]
+      summary: Administrative Lifecycle Status Transition
+      description: Validates and transitions consultation status obeying state machine constraints.
+      operationId: adminUpdateAppointmentStatus
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/appointmentIdParam'
+        - $ref: '#/components/parameters/csrfHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminUpdateAppointmentStatusRequest'
+      responses:
+        '200':
+          description: Status transition executed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentResponse'
+        '400':
+          description: Bad Request — Invalid status transition or constraint violation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/admin/appointments/{id}/reschedule:
+    post:
+      tags: [Administration]
+      summary: Admin Reschedule Consultation
+      description: Moves appointment to another open slot of the same faculty member with audit logging.
+      operationId: adminRescheduleAppointment
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/appointmentIdParam'
+        - $ref: '#/components/parameters/csrfHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RescheduleAppointmentRequest'
+      responses:
+        '200':
+          description: Appointment rescheduled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          $ref: '#/components/responses/ConflictError'
+
+  /api/v1/admin/appointments/{id}/approve:
+    post:
+      tags: [Administration]
+      summary: Admin Approve Appointment
+      description: Administrator approves a PENDING appointment.
+      operationId: adminApproveAppointment
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/appointmentIdParam'
+        - $ref: '#/components/parameters/csrfHeader'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApproveAppointmentRequest'
+      responses:
+        '200':
+          description: Appointment approved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/admin/appointments/{id}/reject:
+    post:
+      tags: [Administration]
+      summary: Admin Reject Appointment
+      description: Administrator rejects a PENDING appointment and releases the reserved slot.
+      operationId: adminRejectAppointment
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/appointmentIdParam'
+        - $ref: '#/components/parameters/csrfHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RejectAppointmentRequest'
+      responses:
+        '200':
+          description: Appointment rejected.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/admin/appointments/{id}/cancel:
+    post:
+      tags: [Administration]
+      summary: Admin Cancel Appointment
+      description: Administrator cancels a consultation and releases the availability slot.
+      operationId: adminCancelAppointment
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/appointmentIdParam'
+        - $ref: '#/components/parameters/csrfHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelAppointmentRequest'
+      responses:
+        '200':
+          description: Appointment cancelled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/admin/appointments/{id}/complete:
+    post:
+      tags: [Administration]
+      summary: Admin Complete Appointment
+      description: Administrator marks an APPROVED consultation as COMPLETED.
+      operationId: adminCompleteAppointment
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/appointmentIdParam'
+        - $ref: '#/components/parameters/csrfHeader'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteAppointmentRequest'
+      responses:
+        '200':
+          description: Appointment completed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: token
+      description: |
+        Secure HttpOnly session cookie containing a signed JWT access token.
+        Automatically managed and attached by web browsers on same-origin requests (`withCredentials: true`).
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Standard HTTP Bearer authorization header (`Authorization: Bearer <token>`) for API clients.
+
+  parameters:
+    csrfHeader:
+      name: X-Requested-With
+      in: header
+      required: false
+      schema:
+        type: string
+        enum: [XMLHttpRequest]
+        example: XMLHttpRequest
+      description: Mandatory anti-CSRF custom header required on state-changing operations (`POST`, `PUT`, `PATCH`, `DELETE`) when authenticating via HttpOnly session cookies.
+    userIdParam:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+      description: Numeric user ID
+    teacherIdParam:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+      description: Numeric teacher profile ID or user ID
+    appointmentIdParam:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+      description: Numeric appointment ID
+    slotIdParam:
+      name: slotId
+      in: path
+      required: true
+      schema:
+        type: integer
+      description: Numeric availability slot ID
+    notificationIdParam:
+      name: notificationId
+      in: path
+      required: true
+      schema:
+        type: integer
+      description: Numeric notification ID
+
+  headers:
+    SetCookieAuth:
+      description: HttpOnly session cookie containing signed JWT access token.
+      schema:
+        type: string
+        example: token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...; Path=/; HttpOnly; SameSite=Strict
+
+  schemas:
+    ErrorEnvelope:
+      type: object
+      required: [success, error]
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              example: AUTHENTICATION_REQUIRED
+            message:
+              type: string
+              example: Authorization header with Bearer token is required.
+            details:
+              type: array
+              items:
+                type: string
+              example: []
+
+    SuccessEnvelope:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: Operation completed successfully.
+        data:
+          type: object
+
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 2
+        email:
+          type: string
+          format: email
+          example: robert.miller@university.edu
+        firstName:
+          type: string
+          example: Robert
+        lastName:
+          type: string
+          example: Miller
+        role:
+          type: string
+          enum: [STUDENT, TEACHER, ADMIN]
+          example: TEACHER
+        status:
+          type: string
+          enum: [ACTIVE, PENDING_APPROVAL, SUSPENDED]
+          example: ACTIVE
+
+    StudentProfile:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        userId:
+          type: integer
+          example: 3
+        studentIdNumber:
+          type: string
+          example: STU-2026-0042
+        departmentId:
+          type: integer
+          example: 1
+        departmentName:
+          type: string
+          example: Computer Science and Engineering
+        departmentCode:
+          type: string
+          example: CSE
+
+    TeacherProfile:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        userId:
+          type: integer
+          example: 2
+        departmentId:
+          type: integer
+          example: 1
+        departmentName:
+          type: string
+          example: Computer Science and Engineering
+        departmentCode:
+          type: string
+          example: CSE
+        designation:
+          type: string
+          example: Associate Professor
+        officeRoom:
+          type: string
+          example: UB-401
+        bio:
+          type: string
+          nullable: true
+          example: Research focuses on distributed algorithms and cloud database design.
+        isVerified:
+          type: integer
+          enum: [0, 1]
+          example: 1
+        courses:
+          type: array
+          items:
+            type: string
+          example: [CSE101, CSE311]
+
+    Department:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: Computer Science and Engineering
+        code:
+          type: string
+          example: CSE
+        description:
+          type: string
+          nullable: true
+          example: School of Computing and Information Systems.
+
+    AvailabilitySlot:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 101
+        teacherId:
+          type: integer
+          example: 1
+        slotDate:
+          type: string
+          format: date
+          example: "2027-09-15"
+        startTime:
+          type: string
+          example: "10:00"
+        endTime:
+          type: string
+          example: "10:30"
+        startTimestamp:
+          type: string
+          example: "2027-09-15 10:00:00"
+        endTimestamp:
+          type: string
+          example: "2027-09-15 10:30:00"
+        isAvailable:
+          type: integer
+          enum: [0, 1]
+          example: 1
+        isActive:
+          type: integer
+          enum: [0, 1]
+          example: 1
+
+    Appointment:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 822
+        studentId:
+          type: integer
+          example: 1
+        teacherId:
+          type: integer
+          example: 1
+        slotId:
+          type: integer
+          example: 101
+        title:
+          type: string
+          example: Algorithm Project Review
+        purpose:
+          type: string
+          example: Guidance regarding graph optimization and time complexity.
+        status:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED, CANCELLED, COMPLETED, RESCHEDULE_PENDING]
+          example: PENDING
+        cancellationReason:
+          type: string
+          nullable: true
+          example: null
+        cancelledBy:
+          type: string
+          nullable: true
+          example: null
+        createdAt:
+          type: string
+          example: "2026-10-24 16:00:00"
+        updatedAt:
+          type: string
+          example: "2026-10-24 16:00:00"
+        studentFirstName:
+          type: string
+          example: Jane
+        studentLastName:
+          type: string
+          example: Doe
+        studentEmail:
+          type: string
+          example: jane.doe@university.edu
+        studentIdNumber:
+          type: string
+          example: STU-2026-0042
+        teacherFirstName:
+          type: string
+          example: Robert
+        teacherLastName:
+          type: string
+          example: Miller
+        teacherEmail:
+          type: string
+          example: robert.miller@university.edu
+        officeRoom:
+          type: string
+          example: UB-401
+        designation:
+          type: string
+          example: Associate Professor
+        slotDate:
+          type: string
+          example: "2027-09-15"
+        startTime:
+          type: string
+          example: "10:00"
+        endTime:
+          type: string
+          example: "10:30"
+        startTimestamp:
+          type: string
+          example: "2027-09-15 10:00:00"
+        endTimestamp:
+          type: string
+          example: "2027-09-15 10:30:00"
+
+    AppointmentHistory:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        appointmentId:
+          type: integer
+          example: 822
+        action:
+          type: string
+          example: STATUS_CHANGE
+        previousStatus:
+          type: string
+          nullable: true
+          example: PENDING
+        newStatus:
+          type: string
+          example: APPROVED
+        actorId:
+          type: integer
+          example: 2
+        actorRole:
+          type: string
+          example: TEACHER
+        notes:
+          type: string
+          nullable: true
+          example: Please bring your rough sketches to the meeting.
+        createdAt:
+          type: string
+          example: "2026-10-24 16:15:00"
+
+    Notification:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 105
+        recipientId:
+          type: integer
+          example: 6
+        appointmentId:
+          type: integer
+          nullable: true
+          example: 42
+        title:
+          type: string
+          example: Appointment Approved
+        message:
+          type: string
+          example: Your consultation request has been approved.
+        type:
+          type: string
+          enum: [STATUS_UPDATE, BOOKING_REQUEST, CANCELLATION, RESCHEDULE_REQUEST, REMINDER]
+          example: STATUS_UPDATE
+        isRead:
+          type: integer
+          enum: [0, 1]
+          example: 0
+        createdAt:
+          type: string
+          example: "2026-10-24 16:30:00"
+
+    ConsultationFeedback:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        appointmentId:
+          type: integer
+          example: 822
+        studentId:
+          type: integer
+          example: 3
+        teacherId:
+          type: integer
+          example: 2
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+          example: 5
+        comments:
+          type: string
+          nullable: true
+          example: Very insightful discussion on graph algorithms.
+        createdAt:
+          type: string
+          example: "2026-10-27 09:15:00"
+
+    AuditLog:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1614
+        actorId:
+          type: integer
+          example: 1
+        action:
+          type: string
+          example: UPDATE_USER_STATUS
+        entityType:
+          type: string
+          example: USER
+        entityId:
+          type: string
+          example: "6"
+        details:
+          type: string
+          example: '{"previous":"ACTIVE","updated":"SUSPENDED"}'
+        ipAddress:
+          type: string
+          example: "127.0.0.1"
+        createdAt:
+          type: string
+          example: "2026-10-24 16:24:22"
+        actorEmail:
+          type: string
+          example: admin@university.edu
+        firstName:
+          type: string
+          example: System
+        lastName:
+          type: string
+          example: Administrator
+
+    RegisterStudentRequest:
+      type: object
+      required: [email, password, firstName, lastName, studentIdNumber, departmentId]
+      properties:
+        email:
+          type: string
+          format: email
+          minLength: 5
+          maxLength: 255
+          example: student@university.edu
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 128
+          example: Password123!
+        firstName:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Jane
+        lastName:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Doe
+        studentIdNumber:
+          type: string
+          minLength: 2
+          maxLength: 50
+          example: STU-2026-0042
+        departmentId:
+          type: integer
+          example: 1
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: robert.miller@university.edu
+        password:
+          type: string
+          format: password
+          example: Password123!
+
+    UpdateUserProfileRequest:
+      type: object
+      properties:
+        firstName:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Jane
+        lastName:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Doe
+
+    CreateAvailabilitySlotRequest:
+      type: object
+      required: [slotDate, startTime, endTime]
+      properties:
+        slotDate:
+          type: string
+          format: date
+          example: "2027-09-15"
+        startTime:
+          type: string
+          pattern: ^\d{2}:\d{2}(:\d{2})?$
+          example: "10:00"
+        endTime:
+          type: string
+          pattern: ^\d{2}:\d{2}(:\d{2})?$
+          example: "10:30"
+
+    UpdateAvailabilitySlotRequest:
+      type: object
+      required: [isActive]
+      properties:
+        isActive:
+          type: boolean
+          example: true
+
+    UpdateTeacherProfileRequest:
+      type: object
+      properties:
+        designation:
+          type: string
+          example: Associate Professor
+        officeRoom:
+          type: string
+          example: UB-401
+        bio:
+          type: string
+          example: Focused on distributed systems and software architecture.
+
+    CheckConflictRequest:
+      type: object
+      properties:
+        slotId:
+          type: integer
+          example: 101
+        teacherId:
+          type: integer
+          example: 1
+        startTimestamp:
+          type: string
+          example: "2027-09-15 10:00:00"
+        endTimestamp:
+          type: string
+          example: "2027-09-15 10:30:00"
+        excludeAppointmentId:
+          type: integer
+          example: 822
+
+    CreateAppointmentRequest:
+      type: object
+      required: [slotId, title, purpose]
+      properties:
+        slotId:
+          type: integer
+          example: 101
+        title:
+          type: string
+          minLength: 3
+          maxLength: 200
+          example: Algorithm Project Review
+        purpose:
+          type: string
+          minLength: 5
+          maxLength: 1000
+          example: Need guidance regarding graph optimization for assignment 3.
+
+    ApproveAppointmentRequest:
+      type: object
+      properties:
+        notes:
+          type: string
+          maxLength: 500
+          example: Please bring your rough sketches to the meeting.
+
+    RejectAppointmentRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 3
+          maxLength: 500
+          example: Department faculty meeting scheduled during this window.
+        notes:
+          type: string
+          maxLength: 500
+
+    CancelAppointmentRequest:
+      type: object
+      required: [cancellationReason]
+      properties:
+        cancellationReason:
+          type: string
+          minLength: 3
+          maxLength: 500
+          example: Resolved issue during tutorial session.
+
+    RescheduleAppointmentRequest:
+      type: object
+      required: [proposedSlotId, reason]
+      properties:
+        proposedSlotId:
+          type: integer
+          example: 102
+        reason:
+          type: string
+          minLength: 3
+          maxLength: 500
+          example: Rescheduling due to exam schedule overlap.
+
+    CompleteAppointmentRequest:
+      type: object
+      properties:
+        notes:
+          type: string
+          maxLength: 500
+          example: Consultation completed successfully. Discussed graph algorithms.
+
+    SubmitFeedbackRequest:
+      type: object
+      required: [rating]
+      properties:
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+          example: 5
+        comments:
+          type: string
+          maxLength: 1000
+          nullable: true
+          example: Very insightful discussion on graph algorithms.
+
+    AdminUpdateUserStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ACTIVE, PENDING_APPROVAL, SUSPENDED]
+          example: SUSPENDED
+
+    AdminCreateTeacherRequest:
+      type: object
+      required: [email, password, firstName, lastName, departmentId, designation, officeRoom]
+      properties:
+        email:
+          type: string
+          format: email
+          example: prof.smith@university.edu
+        password:
+          type: string
+          format: password
+          example: TemporaryPass123!
+        firstName:
+          type: string
+          example: Alice
+        lastName:
+          type: string
+          example: Smith
+        departmentId:
+          type: integer
+          example: 1
+        designation:
+          type: string
+          example: Assistant Professor
+        officeRoom:
+          type: string
+          example: UB-502
+        bio:
+          type: string
+          example: Specializes in machine learning and data engineering.
+        isVerified:
+          type: integer
+          enum: [0, 1]
+          default: 1
+          example: 1
+        status:
+          type: string
+          enum: [ACTIVE, PENDING_APPROVAL, SUSPENDED]
+          default: ACTIVE
+          example: ACTIVE
+        courses:
+          type: array
+          items:
+            type: string
+          example: [CSE202, CSE401]
+
+    AdminUpdateTeacherRequest:
+      type: object
+      properties:
+        firstName:
+          type: string
+          example: Alice
+        lastName:
+          type: string
+          example: Smith
+        email:
+          type: string
+          format: email
+          example: prof.smith@university.edu
+        departmentId:
+          type: integer
+          example: 1
+        designation:
+          type: string
+          example: Associate Professor
+        officeRoom:
+          type: string
+          example: UB-504
+        bio:
+          type: string
+          example: Updated research biography.
+        isVerified:
+          type: integer
+          enum: [0, 1]
+          example: 1
+
+    AdminUpdateTeacherStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ACTIVE, PENDING_APPROVAL, SUSPENDED]
+          example: SUSPENDED
+        cancelUpcoming:
+          type: boolean
+          default: false
+          example: true
+        cancellationReason:
+          type: string
+          example: Faculty member on administrative leave.
+
+    AdminUpdateAppointmentMetadataRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 3
+          maxLength: 200
+          example: Updated Consultation Subject
+        purpose:
+          type: string
+          minLength: 5
+          maxLength: 1000
+          example: Expanded discussion of capstone project requirements.
+
+    AdminUpdateAppointmentStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED, CANCELLED, COMPLETED, RESCHEDULE_PENDING]
+          example: APPROVED
+        reason:
+          type: string
+          example: Approved under administrative authority.
+        notes:
+          type: string
+          example: Additional oversight notes.
+
+    ApiCatalogResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            name:
+              type: string
+              example: Teacher-Student Appointment System API
+            version:
+              type: string
+              example: v1
+            documentation:
+              type: string
+              example: /docs
+            status:
+              type: string
+              example: operational
+            endpoints:
+              type: object
+
+    HealthCheckResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            status:
+              type: string
+              example: UP
+            service:
+              type: string
+              example: teacher-student-appointment-backend
+            timestamp:
+              type: string
+              example: "2026-11-11T12:00:00.000Z"
+            uptimeSeconds:
+              type: number
+              example: 1420.5
+            environment:
+              type: string
+              example: development
+            memoryUsage:
+              type: object
+              properties:
+                rssMb:
+                  type: number
+                  example: 74.32
+                heapUsedMb:
+                  type: number
+                  example: 38.15
+
+    ReadinessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            status:
+              type: string
+              example: READY
+            timestamp:
+              type: string
+              example: "2026-11-11T12:00:00.000Z"
+            checks:
+              type: object
+              properties:
+                database:
+                  type: object
+                  properties:
+                    connected:
+                      type: boolean
+                      example: true
+                    latencyMs:
+                      type: number
+                      example: 2
+                migrations:
+                  type: object
+                  properties:
+                    isUpToDate:
+                      type: boolean
+                      example: true
+                    totalAvailable:
+                      type: integer
+                      example: 3
+                    appliedCount:
+                      type: integer
+                      example: 3
+                    pendingCount:
+                      type: integer
+                      example: 0
+
+    AuthSuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            token:
+              type: string
+              example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+            user:
+              $ref: '#/components/schemas/User'
+
+    LogoutResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: Successfully logged out
+        data:
+          type: object
+          properties:
+            loggedOut:
+              type: boolean
+              example: true
+            redirectTo:
+              type: string
+              example: /login
+            cleared:
+              type: array
+              items:
+                type: string
+              example: [token, cookies, storage]
+
+    UserProfileResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            id:
+              type: integer
+              example: 2
+            email:
+              type: string
+              example: robert.miller@university.edu
+            firstName:
+              type: string
+              example: Robert
+            lastName:
+              type: string
+              example: Miller
+            role:
+              type: string
+              example: TEACHER
+            status:
+              type: string
+              example: ACTIVE
+            profile:
+              oneOf:
+                - $ref: '#/components/schemas/StudentProfile'
+                - $ref: '#/components/schemas/TeacherProfile'
+
+    DepartmentListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            departments:
+              type: array
+              items:
+                $ref: '#/components/schemas/Department'
+
+    NotificationListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            total:
+              type: integer
+              example: 2
+            notifications:
+              type: array
+              items:
+                $ref: '#/components/schemas/Notification'
+
+    NotificationResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: Notification marked as read.
+        data:
+          $ref: '#/components/schemas/Notification'
+
+    MarkAllNotificationsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: All notifications marked as read.
+        data:
+          type: object
+          properties:
+            recipientId:
+              type: integer
+              example: 6
+            updatedCount:
+              type: integer
+              example: 2
+
+    TeacherListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            teachers:
+              type: array
+              items:
+                $ref: '#/components/schemas/TeacherProfile'
+
+    TeacherDetailResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            teacher:
+              $ref: '#/components/schemas/TeacherProfile'
+
+    SlotListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            slots:
+              type: array
+              items:
+                $ref: '#/components/schemas/AvailabilitySlot'
+
+    SlotResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            slot:
+              $ref: '#/components/schemas/AvailabilitySlot'
+
+    CheckConflictResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            hasConflict:
+              type: boolean
+              example: false
+            slotAvailable:
+              type: boolean
+              example: true
+            studentHasConflict:
+              type: boolean
+              example: false
+
+    AppointmentListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            appointments:
+              type: array
+              items:
+                $ref: '#/components/schemas/Appointment'
+
+    AppointmentResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            appointment:
+              $ref: '#/components/schemas/Appointment'
+
+    AppointmentHistoryResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            history:
+              type: array
+              items:
+                $ref: '#/components/schemas/AppointmentHistory'
+
+    FeedbackResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: Consultation feedback submitted successfully.
+        data:
+          $ref: '#/components/schemas/ConsultationFeedback'
+
+    FeedbackQueryResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/ConsultationFeedback'
+
+    AppointmentSummaryResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            summary:
+              $ref: '#/components/schemas/AppointmentSummary'
+
+    AppointmentSummary:
+      type: object
+      properties:
+        totalAppointments:
+          type: integer
+          example: 44
+        pendingCount:
+          type: integer
+          example: 12
+        approvedCount:
+          type: integer
+          example: 18
+        completedCount:
+          type: integer
+          example: 8
+        cancelledCount:
+          type: integer
+          example: 4
+        rejectedCount:
+          type: integer
+          example: 2
+
+    AdminUserListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            total:
+              type: integer
+              example: 24
+            users:
+              type: array
+              items:
+                $ref: '#/components/schemas/User'
+
+    AdminTeacherListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            total:
+              type: integer
+              example: 14
+            page:
+              type: integer
+              example: 1
+            limit:
+              type: integer
+              example: 10
+            totalPages:
+              type: integer
+              example: 2
+            teachers:
+              type: array
+              items:
+                $ref: '#/components/schemas/TeacherProfile'
+
+    AdminTeacherDetailResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            teacher:
+              $ref: '#/components/schemas/TeacherProfile'
+
+    AdminAppointmentListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            total:
+              type: integer
+              example: 44
+            page:
+              type: integer
+              example: 1
+            limit:
+              type: integer
+              example: 10
+            totalPages:
+              type: integer
+              example: 5
+            appointments:
+              type: array
+              items:
+                $ref: '#/components/schemas/Appointment'
+
+    AuditLogListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            logs:
+              type: array
+              items:
+                $ref: '#/components/schemas/AuditLog'
+
+  responses:
+    BadRequestError:
+      description: Bad Request — Request validation failure, invalid syntax, or missing mandatory parameters.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+
+    UnauthorizedError:
+      description: Unauthorized — Authentication credentials missing, forged, expired, or revoked.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+
+    ForbiddenError:
+      description: Forbidden — Insufficient role permissions, resource ownership mismatch, or CSRF validation rejection.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+
+    NotFoundError:
+      description: Not Found — The requested resource does not exist.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+
+    ConflictError:
+      description: Conflict — Resource state conflict (duplicate email, overlapping availability slot, or double-booked consultation).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+
+    TooManyRequestsError:
+      description: Too Many Requests — Rate limit threshold exceeded for authentication attempts.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+
+    InternalServerError:
+      description: Internal Server Error — An unexpected server exception occurred.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+
+    ServiceUnavailableError:
+      description: Service Unavailable — Database or critical subsystem offline during readiness probe.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'

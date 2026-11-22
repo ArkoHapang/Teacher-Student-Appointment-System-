@@ -10,7 +10,9 @@ const cors = require('cors');
 const env = require('./config/env');
 const requestLogger = require('./middlewares/requestLogger');
 const { notFoundHandler, errorHandler } = require('./middlewares/errorHandler');
+const { clientIpMiddleware } = require('./utils/clientIpResolver');
 const apiV1Router = require('./routes');
+const { mountDocumentation } = require('./docs/swaggerDoc');
 
 const app = express();
 
@@ -28,6 +30,9 @@ app.use((req, res, next) => {
   next();
 });
 
+// 0b. Safe Client IP Resolution
+app.use(clientIpMiddleware);
+
 // 1. Cross-Origin Resource Sharing (CORS)
 app.use(cors({
   origin: env.cors.origin,
@@ -44,6 +49,9 @@ app.use(requestLogger);
 
 // 4. API Routes Mounting (/api/v1)
 app.use(env.apiPrefix, apiV1Router);
+
+// 4b. Interactive OpenAPI / Swagger Documentation
+mountDocumentation(app);
 
 // 5. Static Frontend Asset Serving (Unified Production / Cloud Hosting)
 const frontendDist = path.resolve(__dirname, '../../frontend/dist');

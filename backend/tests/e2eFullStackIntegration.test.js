@@ -15,6 +15,7 @@
  * 10. Logout invalidates applicable authentication state and protected access is denied afterward (401 Unauthorized).
  */
 
+require('./setup');
 const assert = require('assert');
 const http = require('http');
 const app = require('../src/app');

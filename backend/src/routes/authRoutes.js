@@ -7,7 +7,46 @@ const router = express.Router();
 const authController = require('../controllers/authController');
 const { authenticate } = require('../middlewares/authMiddleware');
 const { validate } = require('../middlewares/validator');
-const { loginRateLimiter } = require('../middlewares/rateLimiter');
+const { loginRateLimiter, registrationRateLimiter } = require('../middlewares/rateLimiter');
+
+// Student registration validation schema
+const registerSchema = {
+  email: {
+    required: true,
+    type: 'string',
+    minLength: 5,
+    maxLength: 255,
+    pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+    patternMessage: 'Email address must be a valid format.'
+  },
+  password: {
+    required: true,
+    type: 'string',
+    minLength: 8,
+    maxLength: 128
+  },
+  firstName: {
+    required: true,
+    type: 'string',
+    minLength: 1,
+    maxLength: 100
+  },
+  lastName: {
+    required: true,
+    type: 'string',
+    minLength: 1,
+    maxLength: 100
+  },
+  studentIdNumber: {
+    required: true,
+    type: 'string',
+    minLength: 2,
+    maxLength: 50
+  },
+  departmentId: {
+    required: true
+  }
+};
 
 // Login validation schema
 const loginSchema = {
@@ -26,6 +65,7 @@ const loginSchema = {
 };
 
 // Public Routes
+router.post('/register', registrationRateLimiter.middleware(), validate(registerSchema), authController.register);
 router.post('/login', loginRateLimiter.middleware(), validate(loginSchema), authController.login);
 
 // Logout endpoints (POST for API callers; GET for browser redirects)

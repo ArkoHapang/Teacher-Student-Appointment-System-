@@ -11,6 +11,7 @@
  * 8. Audit ledger verification for administrative operations.
  */
 
+require('./setup');
 const assert = require('assert');
 const request = require('supertest');
 const app = require('../src/app');

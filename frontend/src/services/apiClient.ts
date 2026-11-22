@@ -1,6 +1,7 @@
 /**
  * Centralized API Client
- * Manages authentication headers, response schemas, error interception (401/403/409), and JSON serialization.
+ * Manages cookie-authenticated requests, CSRF defense headers, response schemas,
+ * error interception (401/403/409), and JSON serialization.
  */
 
 import { ApiErrorPayload } from '../types/admin';
@@ -21,54 +22,70 @@ export class ApiError extends Error {
 
 type UnauthorizedHandler = () => void;
 let unauthorizedListener: UnauthorizedHandler | null = null;
+let hasNotifiedUnauthorized = false;
 
-const TOKEN_KEY = 'ts_auth_token';
 const USER_KEY = 'ts_auth_user';
 
 export const apiClient = {
-  setToken(token: string | null) {
-    if (token) {
-      localStorage.setItem(TOKEN_KEY, token);
-    } else {
-      localStorage.removeItem(TOKEN_KEY);
-      localStorage.removeItem(USER_KEY);
-    }
-  },
-
-  getToken(): string | null {
-    return localStorage.getItem(TOKEN_KEY);
-  },
-
   onUnauthorized(handler: UnauthorizedHandler) {
     unauthorizedListener = handler;
+  },
+
+  resetUnauthorizedGuard() {
+    hasNotifiedUnauthorized = false;
   },
 
   async request<T>(
     endpoint: string,
     options: RequestInit = {}
   ): Promise<{ success: boolean; data: T; message?: string }> {
-    const token = this.getToken();
+    const method = (options.method || 'GET').toUpperCase();
+    const isMutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
+
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
       Accept: 'application/json',
       ...(options.headers as Record<string, string>)
     };
 
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
+    // Add CSRF defense header on state-changing requests
+    if (isMutation) {
+      headers['X-Requested-With'] = 'XMLHttpRequest';
+    }
+
+    // Explicitly negotiate cookie-only mode on authentication entrypoints
+    if (endpoint.endsWith('/auth/login') || endpoint.endsWith('/auth/register')) {
+      headers['X-Session-Mode'] = 'cookie-only';
+    }
+
+    // Set Content-Type: application/json for requests with a body, unless it's FormData
+    if (!(options.body instanceof FormData) && !headers['Content-Type'] && options.body !== undefined) {
+      headers['Content-Type'] = 'application/json';
     }
 
     const response = await fetch(endpoint, {
       ...options,
       headers,
-      credentials: options.credentials || 'include'
+      credentials: 'include'
     });
 
     // Handle session expiration & unauthorized
     if (response.status === 401) {
-      this.setToken(null);
-      if (unauthorizedListener) {
-        unauthorizedListener();
+      const isAuthEntrypoint = endpoint.endsWith('/auth/login') || endpoint.endsWith('/auth/register');
+      if (!isAuthEntrypoint) {
+        try {
+          if (typeof localStorage !== 'undefined') {
+            localStorage.removeItem(USER_KEY);
+            localStorage.removeItem('ts_auth_token'); // Ensure legacy storage is cleared
+          }
+        } catch {
+          // Safe storage access
+        }
+        if (!hasNotifiedUnauthorized) {
+          hasNotifiedUnauthorized = true;
+          if (unauthorizedListener) {
+            unauthorizedListener();
+          }
+        }
       }
     }
 
@@ -114,21 +131,23 @@ export const apiClient = {
     return this.request<T>(url, { method: 'GET' });
   },
 
-  post<T>(endpoint: string, body?: unknown): Promise<{ success: boolean; data: T; message?: string }> {
+  post<T>(endpoint: string, body?: unknown, options?: RequestInit): Promise<{ success: boolean; data: T; message?: string }> {
     return this.request<T>(endpoint, {
+      ...options,
       method: 'POST',
-      body: body !== undefined ? JSON.stringify(body) : undefined
+      body: body instanceof FormData ? body : (body !== undefined ? JSON.stringify(body) : undefined)
     });
   },
 
-  patch<T>(endpoint: string, body?: unknown): Promise<{ success: boolean; data: T; message?: string }> {
+  patch<T>(endpoint: string, body?: unknown, options?: RequestInit): Promise<{ success: boolean; data: T; message?: string }> {
     return this.request<T>(endpoint, {
+      ...options,
       method: 'PATCH',
-      body: body !== undefined ? JSON.stringify(body) : undefined
+      body: body instanceof FormData ? body : (body !== undefined ? JSON.stringify(body) : undefined)
     });
   },
 
-  delete<T>(endpoint: string): Promise<{ success: boolean; data: T; message?: string }> {
-    return this.request<T>(endpoint, { method: 'DELETE' });
+  delete<T>(endpoint: string, options?: RequestInit): Promise<{ success: boolean; data: T; message?: string }> {
+    return this.request<T>(endpoint, { ...options, method: 'DELETE' });
   }
 };

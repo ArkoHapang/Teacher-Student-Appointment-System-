@@ -14,6 +14,7 @@ const { ROLES, APPOINTMENT_STATUS } = require('../constants/roles');
 const { isValidTransition, isTerminalStatus } = require('../constants/appointmentLifecycle');
 const slotService = require('./slotService');
 const conflictService = require('./conflictService');
+const notificationService = require('./notificationService');
 const { AppError } = require('../middlewares/errorHandler');
 const logger = require('../config/logger');
 
@@ -107,6 +108,34 @@ const appointmentService = {
          VALUES (?, NULL, 'PENDING', ?, ?);`,
         [appointmentId, user.id, 'Appointment requested by student']
       );
+
+      // 5. Dispatch notification to assigned teacher
+      let studentName = `${user.firstName || ''} ${user.lastName || ''}`.trim();
+      if (!studentName) {
+        const studentUser = await tx.queryOne(
+          'SELECT first_name, last_name FROM users WHERE id = ?;',
+          [user.id]
+        );
+        if (studentUser) {
+          studentName = `${studentUser.first_name || ''} ${studentUser.last_name || ''}`.trim();
+        }
+      }
+      studentName = studentName || 'A student';
+
+      const bookingTime = slot.start_time ? ` at ${slot.start_time}` : '';
+      const bookingDate = slot.slot_date ? ` on ${slot.slot_date}` : '';
+
+      const teacherRecipientId = slot.teacher_user_id || (
+        await tx.queryOne('SELECT user_id FROM teacher_profiles WHERE id = ?;', [slot.teacher_id])
+      )?.user_id;
+
+      await notificationService.createNotification(tx, {
+        recipientId: teacherRecipientId,
+        appointmentId,
+        title: 'New Appointment Request',
+        message: `${studentName} requested an appointment${bookingDate}${bookingTime}. Subject: ${title.trim()}`,
+        type: notificationService.NOTIFICATION_TYPES.BOOKING_REQUEST
+      });
 
       logger.info(`[AppointmentService] Appointment #${appointmentId} requested by User #${user.id} for Slot #${slotId}`);
 
@@ -277,6 +306,21 @@ const appointmentService = {
         [appointmentId, appointment.status, user.id, notes || 'Appointment approved by faculty member']
       );
 
+      // Dispatch notification to student
+      const slotTimeInfo = appointment.slot_date && appointment.start_time
+        ? ` scheduled for ${appointment.slot_date} at ${appointment.start_time}`
+        : '';
+      const teacherName = `${appointment.teacher_first_name || ''} ${appointment.teacher_last_name || ''}`.trim();
+      const approverInfo = teacherName ? ` by ${teacherName}` : '';
+
+      await notificationService.createNotification(tx, {
+        recipientId: appointment.student_user_id,
+        appointmentId,
+        title: 'Appointment Approved',
+        message: `Your appointment request '${appointment.title}'${slotTimeInfo} has been approved${approverInfo}.`,
+        type: notificationService.NOTIFICATION_TYPES.STATUS_UPDATE
+      });
+
       logger.info(`[AppointmentService] Appointment #${appointmentId} APPROVED by User #${user.id}`);
 
       return {
@@ -334,6 +378,20 @@ const appointmentService = {
          VALUES (?, ?, 'REJECTED', ?, ?);`,
         [appointmentId, appointment.status, user.id, notes || reason || 'Appointment rejected by faculty member']
       );
+
+      // Dispatch notification to student with reason if available
+      const rejectionReason = reason || notes || null;
+      const teacherName = `${appointment.teacher_first_name || ''} ${appointment.teacher_last_name || ''}`.trim();
+      const rejectorInfo = teacherName ? ` by ${teacherName}` : '';
+      const reasonSuffix = rejectionReason ? ` Reason: ${rejectionReason}` : '';
+
+      await notificationService.createNotification(tx, {
+        recipientId: appointment.student_user_id,
+        appointmentId,
+        title: 'Appointment Rejected',
+        message: `Your appointment request '${appointment.title}' was rejected${rejectorInfo}.${reasonSuffix}`,
+        type: notificationService.NOTIFICATION_TYPES.STATUS_UPDATE
+      });
 
       logger.info(`[AppointmentService] Appointment #${appointmentId} REJECTED by User #${user.id}. Slot #${appointment.slot_id} released.`);
 
@@ -405,6 +463,32 @@ const appointmentService = {
          VALUES (?, ?, 'CANCELLED', ?, ?);`,
         [appointmentId, appointment.status, user.id, `Cancelled: ${cancellationReason.trim()}`]
       );
+
+      // Dispatch notification to affected counterparty (or both if Admin)
+      const recipients = [];
+      if (isAdmin) {
+        recipients.push(appointment.student_user_id, appointment.teacher_user_id);
+      } else if (isOwnerStudent) {
+        recipients.push(appointment.teacher_user_id);
+      } else if (isAssignedTeacher) {
+        recipients.push(appointment.student_user_id);
+      }
+
+      const uniqueRecipients = Array.from(new Set(recipients));
+      const reasonSuffix = cancellationReason ? ` Reason: ${cancellationReason.trim()}` : '';
+      const slotTimeInfo = appointment.slot_date && appointment.start_time
+        ? ` scheduled for ${appointment.slot_date} at ${appointment.start_time}`
+        : '';
+
+      for (const recipientId of uniqueRecipients) {
+        await notificationService.createNotification(tx, {
+          recipientId,
+          appointmentId,
+          title: 'Appointment Cancelled',
+          message: `The appointment '${appointment.title}'${slotTimeInfo} has been cancelled.${reasonSuffix}`,
+          type: notificationService.NOTIFICATION_TYPES.STATUS_UPDATE
+        });
+      }
 
       logger.info(`[AppointmentService] Appointment #${appointmentId} CANCELLED by User #${user.id}. Slot #${appointment.slot_id} released.`);
 
@@ -528,6 +612,30 @@ const appointmentService = {
           `Rescheduled from slot #${appointment.slot_id} to #${proposedSlotId}. Reason: ${reason.trim()}`
         ]
       );
+
+      // Dispatch notification to counterparty (or both if Admin)
+      const recipients = [];
+      if (isAdmin) {
+        recipients.push(appointment.student_user_id, appointment.teacher_user_id);
+      } else if (isOwnerStudent) {
+        recipients.push(appointment.teacher_user_id);
+      } else if (isAssignedTeacher) {
+        recipients.push(appointment.student_user_id);
+      }
+
+      const uniqueRecipients = Array.from(new Set(recipients));
+      const newScheduleInfo = `to ${proposedSlot.slot_date} at ${proposedSlot.start_time}`;
+      const reasonSuffix = reason && reason.trim() ? ` Reason: ${reason.trim()}` : '';
+
+      for (const recipientId of uniqueRecipients) {
+        await notificationService.createNotification(tx, {
+          recipientId,
+          appointmentId,
+          title: 'Appointment Rescheduled',
+          message: `The appointment '${appointment.title}' has been rescheduled ${newScheduleInfo}.${reasonSuffix}`,
+          type: notificationService.NOTIFICATION_TYPES.RESCHEDULE_REQUEST
+        });
+      }
 
       logger.info(`[AppointmentService] Appointment #${appointmentId} rescheduled to Slot #${proposedSlotId} by User #${user.id}`);
 

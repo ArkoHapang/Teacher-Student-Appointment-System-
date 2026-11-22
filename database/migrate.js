@@ -18,6 +18,14 @@ const dbPath = customDbArg ? path.resolve(process.cwd(), customDbArg.split('=')[
 const customMigArg = args.find(a => a.startsWith('--migrations='));
 const migrationsDir = customMigArg ? path.resolve(process.cwd(), customMigArg.split('=')[1]) : path.resolve(__dirname, 'migrations');
 
+// Fail-fast safety checks: prevent test mode from modifying development database
+const devDbResolved = path.normalize(path.resolve(__dirname, 'appointment_system.db')).toLowerCase();
+const targetDbResolved = path.normalize(dbPath).toLowerCase();
+
+if (process.env.NODE_ENV === 'test' && targetDbResolved === devDbResolved) {
+  throw new Error(`[CRITICAL SAFETY VIOLATION] Migration runner in test mode refused to target development database: ${dbPath}`);
+}
+
 // Ensure target directory exists for database file
 const dbDir = path.dirname(dbPath);
 if (!fs.existsSync(dbDir)) {

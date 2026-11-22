@@ -16,6 +16,7 @@
  * 12. Concurrency Control & Double Booking Prevention (Atomic conditional slot locks)
  */
 
+require('./setup');
 const assert = require('assert');
 const request = require('supertest');
 const app = require('../src/app');

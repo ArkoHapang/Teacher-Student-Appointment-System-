@@ -25,6 +25,7 @@ const { ROLES, APPOINTMENT_STATUS } = require('../constants/roles');
 const { ALLOWED_TRANSITIONS, isValidTransition, isTerminalStatus } = require('../constants/appointmentLifecycle');
 const slotService = require('./slotService');
 const conflictService = require('./conflictService');
+const notificationService = require('./notificationService');
 const { AppError } = require('../middlewares/errorHandler');
 const logger = require('../config/logger');
 
@@ -609,13 +610,8 @@ const adminAppointmentService = {
     }
     const targetStatus = status.trim().toUpperCase();
 
-    const appointment = await db.queryOne(
-      'SELECT id, student_id, teacher_id, slot_id, status FROM appointments WHERE id = ?;',
-      [parsedId]
-    );
-    if (!appointment) {
-      throw new AppError(`Appointment #${parsedId} not found.`, HTTP_STATUS.NOT_FOUND, 'APPOINTMENT_NOT_FOUND');
-    }
+    const appointment = await this.getAppointmentById(parsedId);
+    const slotId = appointment.slot.id;
 
     // Enforce lifecycle state machine: NO arbitrary status transitions
     if (!isValidTransition(appointment.status, targetStatus)) {
@@ -650,7 +646,7 @@ const adminAppointmentService = {
         // 2. Release slot
         await tx.execute(
           'UPDATE teacher_availability_slots SET is_booked = 0 WHERE id = ?;',
-          [appointment.slot_id]
+          [slotId]
         );
 
         // 3. Record status history
@@ -659,6 +655,19 @@ const adminAppointmentService = {
            VALUES (?, ?, 'CANCELLED', ?, ?);`,
           [parsedId, appointment.status, adminUser.id, reasonText]
         );
+
+        // 4. Dispatch notification to both affected participants
+        const uniqueRecipients = Array.from(new Set([appointment.student.userId, appointment.teacher.userId]));
+        const reasonSuffix = reasonText ? ` Reason: ${reasonText}` : '';
+        for (const recipientId of uniqueRecipients) {
+          await notificationService.createNotification(tx, {
+            recipientId,
+            appointmentId: parsedId,
+            title: 'Appointment Cancelled by Administrator',
+            message: `The appointment '${appointment.title}' scheduled for ${appointment.slot.slotDate} at ${appointment.slot.startTime} has been cancelled by an administrator.${reasonSuffix}`,
+            type: notificationService.NOTIFICATION_TYPES.STATUS_UPDATE
+          });
+        }
       } else if (targetStatus === APPOINTMENT_STATUS.REJECTED) {
         const reasonText = reason && reason.trim().length >= 3
           ? reason.trim()
@@ -675,7 +684,7 @@ const adminAppointmentService = {
         // 2. Release slot
         await tx.execute(
           'UPDATE teacher_availability_slots SET is_booked = 0 WHERE id = ?;',
-          [appointment.slot_id]
+          [slotId]
         );
 
         // 3. Record status history
@@ -684,9 +693,22 @@ const adminAppointmentService = {
            VALUES (?, ?, 'REJECTED', ?, ?);`,
           [parsedId, appointment.status, adminUser.id, reasonText]
         );
+
+        // 4. Dispatch notification to both affected participants
+        const uniqueRecipients = Array.from(new Set([appointment.student.userId, appointment.teacher.userId]));
+        const reasonSuffix = reasonText ? ` Reason: ${reasonText}` : '';
+        for (const recipientId of uniqueRecipients) {
+          await notificationService.createNotification(tx, {
+            recipientId,
+            appointmentId: parsedId,
+            title: 'Appointment Rejected by Administrator',
+            message: `The appointment request '${appointment.title}' has been rejected by an administrator.${reasonSuffix}`,
+            type: notificationService.NOTIFICATION_TYPES.STATUS_UPDATE
+          });
+        }
       } else if (targetStatus === APPOINTMENT_STATUS.APPROVED) {
         // Assert no slot conflict
-        await conflictService.assertNoConflict({ slotId: appointment.slot_id, excludeAppointmentId: parsedId, tx });
+        await conflictService.assertNoConflict({ slotId, excludeAppointmentId: parsedId, tx });
 
         // Update appointment status to APPROVED
         await tx.execute(
@@ -699,7 +721,7 @@ const adminAppointmentService = {
         // Ensure slot is locked as booked
         await tx.execute(
           'UPDATE teacher_availability_slots SET is_booked = 1 WHERE id = ?;',
-          [appointment.slot_id]
+          [slotId]
         );
 
         // Record status history
@@ -708,6 +730,18 @@ const adminAppointmentService = {
            VALUES (?, ?, 'APPROVED', ?, ?);`,
           [parsedId, appointment.status, adminUser.id, notes || 'Approved by administrator']
         );
+
+        // 4. Dispatch notification to both affected participants
+        const uniqueRecipients = Array.from(new Set([appointment.student.userId, appointment.teacher.userId]));
+        for (const recipientId of uniqueRecipients) {
+          await notificationService.createNotification(tx, {
+            recipientId,
+            appointmentId: parsedId,
+            title: 'Appointment Approved by Administrator',
+            message: `The appointment '${appointment.title}' scheduled for ${appointment.slot.slotDate} at ${appointment.slot.startTime} has been approved by an administrator.`,
+            type: notificationService.NOTIFICATION_TYPES.STATUS_UPDATE
+          });
+        }
       } else if (targetStatus === APPOINTMENT_STATUS.COMPLETED) {
         // Mark COMPLETED
         await tx.execute(
@@ -771,13 +805,8 @@ const adminAppointmentService = {
       throw new AppError('A valid reschedule reason (minimum 3 characters) is required.', HTTP_STATUS.BAD_REQUEST, 'RESCHEDULE_REASON_REQUIRED');
     }
 
-    const appointment = await db.queryOne(
-      'SELECT id, student_id, teacher_id, slot_id, status FROM appointments WHERE id = ?;',
-      [parsedId]
-    );
-    if (!appointment) {
-      throw new AppError(`Appointment #${parsedId} not found.`, HTTP_STATUS.NOT_FOUND, 'APPOINTMENT_NOT_FOUND');
-    }
+    const appointment = await this.getAppointmentById(parsedId);
+    const currentSlotId = appointment.slot.id;
 
     // Terminal appointments cannot be rescheduled
     if (isTerminalStatus(appointment.status)) {
@@ -788,13 +817,13 @@ const adminAppointmentService = {
       );
     }
 
-    if (appointment.slot_id === parsedSlotId) {
+    if (currentSlotId === parsedSlotId) {
       throw new AppError('Proposed slot is identical to current appointment slot.', HTTP_STATUS.BAD_REQUEST, 'SAME_SLOT_RESCHEDULE');
     }
 
     return db.transaction(async (tx) => {
       // 1. Validate slot belongs to SAME teacher and is open
-      const proposedSlot = await slotService.validateSlotForBooking(parsedSlotId, appointment.teacher_id);
+      const proposedSlot = await slotService.validateSlotForBooking(parsedSlotId, appointment.teacher.profileId);
 
       // 2. Conflict Detection: Assert no overlapping appointments exist for this teacher
       await conflictService.assertNoConflict({ slotId: parsedSlotId, excludeAppointmentId: parsedId, tx });
@@ -815,7 +844,7 @@ const adminAppointmentService = {
       // 4. Release original slot
       await tx.execute(
         'UPDATE teacher_availability_slots SET is_booked = 0 WHERE id = ?;',
-        [appointment.slot_id]
+        [currentSlotId]
       );
 
       // 5. Update appointment record
@@ -831,7 +860,7 @@ const adminAppointmentService = {
         `INSERT INTO appointment_reschedules
          (appointment_id, requested_by, original_slot_id, proposed_slot_id, reason, status, resolved_at)
          VALUES (?, ?, ?, ?, ?, 'ACCEPTED', CURRENT_TIMESTAMP);`,
-        [parsedId, adminUser.id, appointment.slot_id, parsedSlotId, reason.trim()]
+        [parsedId, adminUser.id, currentSlotId, parsedSlotId, reason.trim()]
       );
 
       // 7. Record status history
@@ -842,7 +871,7 @@ const adminAppointmentService = {
           parsedId,
           appointment.status,
           adminUser.id,
-          `Admin rescheduled from slot #${appointment.slot_id} to #${parsedSlotId}. Reason: ${reason.trim()}`
+          `Admin rescheduled from slot #${currentSlotId} to #${parsedSlotId}. Reason: ${reason.trim()}`
         ]
       );
 
@@ -852,18 +881,31 @@ const adminAppointmentService = {
         action: 'ADMIN_RESCHEDULE_APPOINTMENT',
         entityId: parsedId,
         details: {
-          previousSlotId: appointment.slot_id,
+          previousSlotId: currentSlotId,
           newSlotId: parsedSlotId,
           reason: reason.trim()
         },
         ipAddress
       });
 
+      // 9. Dispatch notification to both participants
+      const uniqueRecipients = Array.from(new Set([appointment.student.userId, appointment.teacher.userId]));
+      const reasonSuffix = reason && reason.trim() ? ` Reason: ${reason.trim()}` : '';
+      for (const recipientId of uniqueRecipients) {
+        await notificationService.createNotification(tx, {
+          recipientId,
+          appointmentId: parsedId,
+          title: 'Appointment Rescheduled by Administrator',
+          message: `The appointment '${appointment.title}' has been rescheduled by an administrator to ${proposedSlot.slot_date} at ${proposedSlot.start_time}.${reasonSuffix}`,
+          type: notificationService.NOTIFICATION_TYPES.RESCHEDULE_REQUEST
+        });
+      }
+
       logger.info(`[AdminAppointmentService] Admin #${adminUser.id} rescheduled Appointment #${parsedId} to Slot #${parsedSlotId}`);
 
       return {
         id: parsedId,
-        previousSlotId: appointment.slot_id,
+        previousSlotId: currentSlotId,
         newSlotId: parsedSlotId,
         status: APPOINTMENT_STATUS.APPROVED,
         slotDetails: {
