@@ -115,11 +115,11 @@ const slotService = {
 
   /**
    * List available (unbooked, active, future) slots for a specific teacher.
+   * Standardizes SQLite timestamp comparison to prevent string-comparison format mismatch.
    * @param {number} teacherId
    * @returns {Promise<Array>}
    */
   async getTeacherAvailableSlots(teacherId) {
-    const nowIso = new Date().toISOString();
     return db.query(
       `SELECT s.*, tp.designation, tp.office_room
        FROM teacher_availability_slots s
@@ -127,9 +127,9 @@ const slotService = {
        WHERE s.teacher_id = ?
          AND s.is_booked = 0
          AND s.is_active = 1
-         AND s.start_timestamp > ?
+         AND datetime(replace(s.start_timestamp, 'T', ' ')) > datetime('now')
        ORDER BY s.start_timestamp ASC;`,
-      [teacherId, nowIso]
+      [teacherId]
     );
   },
 

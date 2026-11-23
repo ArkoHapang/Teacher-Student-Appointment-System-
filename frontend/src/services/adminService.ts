@@ -254,8 +254,17 @@ export const adminService = {
   },
 
   async getReadiness(): Promise<SystemReadinessData> {
-    const res = await apiClient.get<SystemReadinessData>('/api/v1/ready');
-    return res.data;
+    try {
+      const res = await apiClient.get<SystemReadinessData>('/api/v1/ready');
+      return res.data;
+    } catch (err: unknown) {
+      // If readiness endpoint returned 503, preserve diagnostic check data so UI displays what failed
+      const apiErr = err as { data?: SystemReadinessData };
+      if (apiErr?.data && apiErr.data.checks) {
+        return apiErr.data;
+      }
+      throw err;
+    }
   },
 
   // -------------------------------------------------------------

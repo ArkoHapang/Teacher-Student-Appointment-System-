@@ -793,7 +793,7 @@ export const TeacherScheduleView: React.FC<TeacherScheduleViewProps> = ({
                         <span>
                           <strong>{item.previousStatus || 'REQUESTED'}</strong> &rarr; <span style={{ color: 'var(--color-primary-700)', fontWeight: 600 }}>{item.newStatus}</span>
                         </span>
-                        <span style={{ color: 'var(--color-text-muted)' }}>{new Date(item.createdAt).toLocaleDateString()}</span>
+                        <span style={{ color: 'var(--color-text-muted)' }}>{new Date(item.createdAt).toLocaleString()}</span>
                       </div>
                       {item.notes && (
                         <div style={{ color: 'var(--color-text-muted)', marginTop: '2px' }}>

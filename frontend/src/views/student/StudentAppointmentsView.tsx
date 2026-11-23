@@ -270,9 +270,10 @@ export const StudentAppointmentsView: React.FC<StudentAppointmentsViewProps> = (
 
     try {
       const slots = await studentService.getTeacherSlots(selectedAppointment.teacherId);
-      setAvailableSlots(slots);
-      if (slots.length > 0) {
-        setRescheduleSlotId(slots[0].id);
+      const eligibleSlots = slots.filter(s => s.id !== selectedAppointment.slotId);
+      setAvailableSlots(eligibleSlots);
+      if (eligibleSlots.length > 0) {
+        setRescheduleSlotId(eligibleSlots[0].id);
       }
     } catch (err: unknown) {
       const errorObj = err as { message?: string };
@@ -703,16 +704,34 @@ export const StudentAppointmentsView: React.FC<StudentAppointmentsViewProps> = (
             )}
 
             {/* Action Buttons (Cancel / Reschedule) */}
-            {!activeAction && ['PENDING', 'APPROVED', 'RESCHEDULE_PENDING'].includes(selectedAppointment.status) && (
-              <div style={{ borderTop: '1px solid var(--color-border-subtle)', paddingTop: '12px', marginBottom: '16px', display: 'flex', gap: '8px' }}>
-                <Button variant="danger" size="sm" onClick={handleOpenCancel}>
-                  Cancel Consultation
-                </Button>
-                <Button variant="secondary" size="sm" onClick={handleOpenReschedule}>
-                  Reschedule to New Slot
-                </Button>
-              </div>
-            )}
+            {(() => {
+              if (activeAction) return null;
+              if (!['PENDING', 'APPROVED', 'RESCHEDULE_PENDING'].includes(selectedAppointment.status)) return null;
+
+              const slotEndTs = selectedAppointment.endTimestamp || `${selectedAppointment.slotDate} ${selectedAppointment.endTime}`;
+              const isPast = new Date(slotEndTs).getTime() <= Date.now();
+
+              if (isPast) {
+                return (
+                  <div style={{ borderTop: '1px solid var(--color-border-subtle)', paddingTop: '12px', marginBottom: '16px' }}>
+                    <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
+                      This consultation occurred in the past and can no longer be cancelled or rescheduled.
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div style={{ borderTop: '1px solid var(--color-border-subtle)', paddingTop: '12px', marginBottom: '16px', display: 'flex', gap: '8px' }}>
+                  <Button variant="danger" size="sm" onClick={handleOpenCancel}>
+                    Cancel Consultation
+                  </Button>
+                  <Button variant="secondary" size="sm" onClick={handleOpenReschedule}>
+                    Reschedule to New Slot
+                  </Button>
+                </div>
+              );
+            })()}
 
             {/* ACTIVE ACTION: CANCEL */}
             {activeAction === 'cancel' && (
@@ -844,7 +863,7 @@ export const StudentAppointmentsView: React.FC<StudentAppointmentsViewProps> = (
                         <span>
                           <strong>{item.previousStatus || 'REQUESTED'}</strong> &rarr; <span style={{ color: 'var(--color-primary-700)', fontWeight: 600 }}>{item.newStatus}</span>
                         </span>
-                        <span style={{ color: 'var(--color-text-muted)' }}>{new Date(item.createdAt).toLocaleDateString()}</span>
+                        <span style={{ color: 'var(--color-text-muted)' }}>{new Date(item.createdAt).toLocaleString()}</span>
                       </div>
                       {item.notes && (
                         <div style={{ color: 'var(--color-text-muted)', marginTop: '2px' }}>

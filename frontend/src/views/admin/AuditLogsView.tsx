@@ -70,13 +70,15 @@ export const AuditLogsView: React.FC = () => {
       }
       if (search.trim()) {
         const query = search.toLowerCase().trim();
-        const actorName = `${log.first_name} ${log.last_name}`.toLowerCase();
-        const matchesActor = actorName.includes(query) || log.actor_email?.toLowerCase().includes(query);
+        const actorName = (log.first_name || log.last_name)
+          ? `${log.first_name || ''} ${log.last_name || ''}`.toLowerCase()
+          : 'system / autonomous';
+        const matchesActor = actorName.includes(query) || (log.actor_email && log.actor_email.toLowerCase().includes(query));
         const matchesAction = log.action?.toLowerCase().includes(query);
         const matchesEntity = `${log.entity_type} #${log.entity_id}`.toLowerCase().includes(query);
         const matchesDetails = log.details?.toLowerCase().includes(query);
         const matchesIp = log.ip_address?.toLowerCase().includes(query);
-        return matchesActor || matchesAction || matchesEntity || matchesDetails || matchesIp;
+        return Boolean(matchesActor || matchesAction || matchesEntity || matchesDetails || matchesIp);
       }
       return true;
     });
@@ -120,14 +122,20 @@ export const AuditLogsView: React.FC = () => {
   const renderDetails = (detailsStr: string) => {
     if (!detailsStr) return <span style={{ color: 'var(--color-text-muted)' }}>-</span>;
     try {
-      const parsed = JSON.parse(detailsStr);
-      const entries = Object.entries(parsed);
+      const parsed = JSON.parse(detailsStr) as Record<string, unknown>;
+      const sensitiveRegex = /password|token|secret|credential|hash/i;
+      const entries: Array<[string, string]> = Object.entries(parsed).map(([k, v]) => {
+        if (sensitiveRegex.test(k)) {
+          return [k, '[REDACTED]'];
+        }
+        return [k, typeof v === 'object' ? JSON.stringify(v) : String(v)];
+      });
       if (entries.length === 0) return <span>-</span>;
       return (
         <div style={{ fontSize: 'var(--font-size-xs)', fontFamily: 'monospace' }}>
           {entries.map(([k, v]) => (
             <div key={k} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '280px' }}>
-              <strong>{k}:</strong> {typeof v === 'object' ? JSON.stringify(v) : String(v)}
+              <strong>{k}:</strong> {v}
             </div>
           ))}
         </div>
@@ -165,11 +173,15 @@ export const AuditLogsView: React.FC = () => {
       render: row => (
         <div>
           <div style={{ fontWeight: 600, color: 'var(--color-text-main)' }}>
-            {row.first_name} {row.last_name}
+            {row.first_name || row.last_name
+              ? `${row.first_name || ''} ${row.last_name || ''}`.trim()
+              : <span style={{ fontStyle: 'italic', color: 'var(--color-text-muted)' }}>System / Automated</span>}
           </div>
-          <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
-            {row.actor_email}
-          </div>
+          {row.actor_email && (
+            <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
+              {row.actor_email}
+            </div>
+          )}
         </div>
       )
     },

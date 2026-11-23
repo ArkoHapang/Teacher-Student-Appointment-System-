@@ -466,6 +466,31 @@ async function runBrowserInteractionTests() {
         return heading && heading.includes('Administrative Portal');
       });
 
+      // Verify production UI sanitization: seed banner absent, inputs initialized empty
+      const bannerPresent = await evalExpr("document.querySelector('[data-testid=\"admin-dev-credentials-banner\"]') !== null");
+      assert.strictEqual(bannerPresent, false, 'Seed credentials banner must not be rendered in production bundle');
+
+      const initialEmail = await evalExpr("document.getElementById('admin-email')?.value");
+      assert.strictEqual(initialEmail, '', 'Admin email input must initialize empty');
+
+      const initialPassword = await evalExpr("document.getElementById('admin-password')?.value");
+      assert.strictEqual(initialPassword, '', 'Admin password input must initialize empty');
+
+      // Fill credentials
+      await evalExpr(`(() => {
+        const emailInput = document.getElementById('admin-email');
+        const passInput = document.getElementById('admin-password');
+        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        if (emailInput) {
+          nativeInputValueSetter.call(emailInput, 'admin@university.edu');
+          emailInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        if (passInput) {
+          nativeInputValueSetter.call(passInput, 'Password123!');
+          passInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      })()`);
+
       // Submit login
       await evalExpr(`(() => {
         const submitBtn = Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim().includes('Sign In to Admin Portal'));

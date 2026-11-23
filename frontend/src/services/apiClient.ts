@@ -26,6 +26,14 @@ let hasNotifiedUnauthorized = false;
 
 const USER_KEY = 'ts_auth_user';
 
+/**
+ * Production Deployment Architecture:
+ * Strictly routes all API calls through the same-origin Netlify /api/* proxy rewrite.
+ * Direct cross-origin mode is explicitly disabled for this deployment to guarantee
+ * first-party HttpOnly session cookies and Sec-Fetch-Site: same-origin CSRF compliance.
+ */
+const getApiBaseUrl = (): string => '';
+
 export const apiClient = {
   onUnauthorized(handler: UnauthorizedHandler) {
     unauthorizedListener = handler;
@@ -62,7 +70,10 @@ export const apiClient = {
       headers['Content-Type'] = 'application/json';
     }
 
-    const response = await fetch(endpoint, {
+    const baseUrl = getApiBaseUrl();
+    const targetUrl = (baseUrl && endpoint.startsWith('/')) ? `${baseUrl}${endpoint}` : endpoint;
+
+    const response = await fetch(targetUrl, {
       ...options,
       headers,
       credentials: 'include'

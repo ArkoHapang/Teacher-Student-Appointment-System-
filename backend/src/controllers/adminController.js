@@ -386,14 +386,41 @@ const adminController = {
         `SELECT a.id, a.actor_id, a.action, a.entity_type, a.entity_id, a.details, a.ip_address, a.created_at,
                 u.email as actor_email, u.first_name, u.last_name
          FROM audit_logs a
-         JOIN users u ON a.actor_id = u.id
+         LEFT JOIN users u ON a.actor_id = u.id
          ORDER BY a.id DESC
          LIMIT 100;`
       );
 
+      // Redact sensitive credentials/tokens from audit details before sending
+      const sanitizedLogs = logs.map(log => {
+        let details = log.details;
+        if (details && typeof details === 'string') {
+          try {
+            const parsed = JSON.parse(details);
+            const sensitiveKeys = ['password', 'passwordHash', 'token', 'tokenHash', 'secret', 'credential'];
+            let modified = false;
+            for (const key of Object.keys(parsed)) {
+              if (sensitiveKeys.some(sk => key.toLowerCase().includes(sk))) {
+                parsed[key] = '[REDACTED]';
+                modified = true;
+              }
+            }
+            if (modified) {
+              details = JSON.stringify(parsed);
+            }
+          } catch {
+            // keep raw if not JSON
+          }
+        }
+        return {
+          ...log,
+          details
+        };
+      });
+
       return res.status(HTTP_STATUS.OK).json({
         success: true,
-        data: { logs }
+        data: { logs: sanitizedLogs }
       });
     } catch (error) {
       next(error);

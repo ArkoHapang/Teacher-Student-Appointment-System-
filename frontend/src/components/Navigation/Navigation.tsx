@@ -154,16 +154,18 @@ export interface HeaderProps {
   onToggleTheme: () => void;
   onLogout: () => void;
   onOpenMobileMenu?: () => void;
+  onBrandClick?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   currentRole,
-  userName = 'Dr. Robert Miller',
-  userEmail = 'robert.miller@university.edu',
+  userName = 'User',
+  userEmail = '',
   theme,
   onToggleTheme,
   onLogout,
-  onOpenMobileMenu
+  onOpenMobileMenu,
+  onBrandClick
 }) => {
   return (
     <header className="ui-header">
@@ -179,7 +181,17 @@ export const Header: React.FC<HeaderProps> = ({
             <MenuIcon size={22} />
           </button>
         )}
-        <a href="#home" className="ui-header__brand">
+        <a
+          href="#home"
+          className="ui-header__brand"
+          onClick={e => {
+            if (onBrandClick) {
+              e.preventDefault();
+              onBrandClick();
+            }
+          }}
+          aria-label="Return to system home"
+        >
           <div className="ui-header__brand-mark" aria-hidden="true">
             U
           </div>
@@ -294,6 +306,18 @@ export const MobileNav: React.FC<MobileNavProps> = ({
   onSelectItem,
   unreadNotificationsCount
 }) => {
+  // Listen for Escape key to close mobile drawer (Issue #45)
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const config = ROLE_NAVIGATION_CONFIGS[currentRole];

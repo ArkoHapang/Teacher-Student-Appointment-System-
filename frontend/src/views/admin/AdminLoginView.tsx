@@ -20,8 +20,8 @@ export const AdminLoginView: React.FC<AdminLoginViewProps> = ({
   onLoginSuccess,
   sessionExpiredMessage
 }) => {
-  const [email, setEmail] = useState('admin@university.edu');
-  const [password, setPassword] = useState('Password123!');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(sessionExpiredMessage || null);
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
@@ -154,11 +154,23 @@ export const AdminLoginView: React.FC<AdminLoginViewProps> = ({
           </div>
         </form>
 
-        <div style={{ marginTop: '20px', padding: '12px', backgroundColor: 'var(--color-bg-surface-subtle)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
-          <strong>Default Seed Admin Credentials:</strong><br />
-          Email: <code className="code-identifier">admin@university.edu</code><br />
-          Password: <code className="code-identifier">Password123!</code>
-        </div>
+        {import.meta.env.DEV && (
+          <div
+            data-testid="admin-dev-credentials-banner"
+            style={{
+              marginTop: '20px',
+              padding: '12px',
+              backgroundColor: 'var(--color-bg-surface-subtle)',
+              borderRadius: 'var(--radius-sm)',
+              fontSize: 'var(--font-size-xs)',
+              color: 'var(--color-text-muted)'
+            }}
+          >
+            <strong>Default Seed Admin Credentials:</strong><br />
+            Email: <code className="code-identifier">admin@university.edu</code><br />
+            Password: <code className="code-identifier">Password123!</code>
+          </div>
+        )}
       </div>
     </div>
   );

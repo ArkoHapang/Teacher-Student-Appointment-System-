@@ -1,0 +1,29 @@
+# ==============================================================================
+# Netlify Configuration
+# University Teacher-Student Appointment System (Frontend Service)
+# ==============================================================================
+
+[build]
+  base = "frontend"
+  publish = "dist"
+  command = "npm run build"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# 1. API Proxy Rewrite (Recommended Architecture)
+# Proxies /api/* to the Render backend service so all requests are same-origin
+# from the browser perspective, guaranteeing HttpOnly cookie delivery and CSRF compliance.
+# Replace target URL with your actual deployed Render backend address.
+[[redirects]]
+  from = "/api/*"
+  to = "https://ts-appointment-backend.onrender.com/api/:splat"
+  status = 200
+  force = true
+
+# 2. Single Page Application (SPA) Fallback
+# Directs all direct page navigations and deep links to index.html
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

@@ -131,7 +131,7 @@ function normalizeHistory(raw: any): AppointmentHistoryRecord {
     newStatus: raw.newStatus ?? raw.new_status,
     changedBy: raw.changedBy ?? raw.changed_by,
     notes: raw.notes,
-    createdAt: raw.createdAt ?? raw.created_at
+    createdAt: raw.createdAt ?? raw.created_at ?? raw.changed_at ?? raw.changedAt
   };
 }
 

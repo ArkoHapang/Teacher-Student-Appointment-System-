@@ -1,24 +1,46 @@
+# ==============================================================================
+# Render Blueprint Specification
+# University Teacher-Student Appointment System (Backend Service)
+# ==============================================================================
 
 services:
   - type: web
-    name: ts-appointment-system
-    runtime: docker
-    plan: free
-    region: oregon
+    name: ts-appointment-backend
+    runtime: node
+    plan: starter # Starter plan required on Render for persistent disk attachment
+    region: singapore # or frankfurt, singapore, ohio
     branch: main
+    buildCommand: npm install --omit=dev
+    startCommand: node database/migrate.js && node backend/src/server.js
     healthCheckPath: /api/v1/health
+    disk:
+      name: sqlite_data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: NODE_ENV
         value: production
+      - key: NODE_VERSION
+        value: "22"
+      - key: PORT
+        value: "5000"
       - key: API_PREFIX
         value: /api/v1
       - key: DB_CLIENT
         value: sqlite
       - key: DB_FILE
-        value: /data/appointment_system.db
+        value: /var/data/appointment_system.db
+      - key: EMAIL_TRANSPORT
+        value: disabled
       - key: JWT_SECRET
         generateValue: true
       - key: JWT_EXPIRES_IN
         value: 24h
       - key: LOG_LEVEL
         value: info
+      - key: CORS_ORIGIN
+        sync: false # Set in Render Dashboard to your Netlify URL (e.g. https://ts-appointment-system.netlify.app)
+      - key: ADMIN_INITIAL_EMAIL
+        sync: false # Set in Render Dashboard
+      - key: ADMIN_INITIAL_PASSWORD
+        sync: false # Set in Render Dashboard

@@ -370,8 +370,9 @@ async function runConflictTests() {
     });
 
     await test('Cancelled appointments do NOT conflict: released time can be booked with 201 Created', async () => {
+      const cancelTestDate = getFutureDate(9);
       // 1. Create slot and book it
-      const cancelSlot = await createTestSlot({ teacherId: 1, date: '2026-11-23', start: '11:00:00', end: '11:30:00' });
+      const cancelSlot = await createTestSlot({ teacherId: 1, date: cancelTestDate, start: '11:00:00', end: '11:30:00' });
       const bookRes = await request(app)
         .post('/api/v1/appointments')
         .set('Authorization', `Bearer ${studentAliceToken}`)
@@ -401,7 +402,7 @@ async function runConflictTests() {
 
       // 4. David books an overlapping slot (11:15 - 11:45) on that same released window
       // If Alice's appointment were still active, this overlapping slot would be blocked with 409
-      const releasedWindowSlot = await createTestSlot({ teacherId: 1, date: '2026-11-23', start: '11:15:00', end: '11:45:00' });
+      const releasedWindowSlot = await createTestSlot({ teacherId: 1, date: cancelTestDate, start: '11:15:00', end: '11:45:00' });
       const rebookRes = await request(app)
         .post('/api/v1/appointments')
         .set('Authorization', `Bearer ${studentDavidToken}`)

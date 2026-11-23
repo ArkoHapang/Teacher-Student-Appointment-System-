@@ -78,6 +78,26 @@ const appointmentService = {
       // 2. Conflict Detection: Assert no overlapping appointments exist for this teacher
       await conflictService.assertNoConflict({ slotId, tx });
 
+      // Student Conflict Check: Ensure student does not have another active appointment overlapping this slot
+      const studentOverlap = await tx.queryOne(
+        `SELECT a.id, a.title, s.slot_date, s.start_time, s.end_time
+         FROM appointments a
+         JOIN teacher_availability_slots s ON a.slot_id = s.id
+         WHERE a.student_id = ?
+           AND a.status IN ('PENDING', 'APPROVED', 'RESCHEDULE_PENDING')
+           AND s.start_timestamp < ?
+           AND ? < s.end_timestamp
+         LIMIT 1;`,
+        [studentProfile.id, slot.end_timestamp, slot.start_timestamp]
+      );
+      if (studentOverlap) {
+        throw new AppError(
+          `You already have an appointment scheduled during this time window (${studentOverlap.slot_date} ${studentOverlap.start_time.slice(0, 5)} - ${studentOverlap.end_time.slice(0, 5)}).`,
+          HTTP_STATUS.CONFLICT,
+          'STUDENT_SCHEDULE_CONFLICT'
+        );
+      }
+
       // 3. Concurrency Lock: Atomic conditional slot booking
       // If another transaction booked this slot between read and write, changes will be 0
       const lockResult = await tx.execute(
@@ -443,6 +463,16 @@ const appointmentService = {
         );
       }
 
+      // Past appointment check: Cannot cancel if scheduled consultation time has already elapsed
+      const slotEndMs = new Date(appointment.end_timestamp || `${appointment.slot_date} ${appointment.end_time}`).getTime();
+      if (!isNaN(slotEndMs) && slotEndMs <= Date.now()) {
+        throw new AppError(
+          'Cannot cancel a past appointment whose consultation time has already elapsed.',
+          HTTP_STATUS.BAD_REQUEST,
+          'CANNOT_CANCEL_PAST_APPOINTMENT'
+        );
+      }
+
       // 1. Mark appointment as CANCELLED
       await tx.execute(
         `UPDATE appointments
@@ -564,6 +594,27 @@ const appointmentService = {
 
       // 2. Conflict Detection: Assert no overlapping appointments exist for this teacher, ignoring the appointment being rescheduled
       await conflictService.assertNoConflict({ slotId: proposedSlotId, excludeAppointmentId: appointmentId, tx });
+
+      // Student Conflict Check: Ensure student does not have another active appointment overlapping this proposed slot
+      const studentOverlap = await tx.queryOne(
+        `SELECT a.id, a.title, s.slot_date, s.start_time, s.end_time
+         FROM appointments a
+         JOIN teacher_availability_slots s ON a.slot_id = s.id
+         WHERE a.student_id = ?
+           AND a.id != ?
+           AND a.status IN ('PENDING', 'APPROVED', 'RESCHEDULE_PENDING')
+           AND s.start_timestamp < ?
+           AND ? < s.end_timestamp
+         LIMIT 1;`,
+        [appointment.student_id, appointmentId, proposedSlot.end_timestamp, proposedSlot.start_timestamp]
+      );
+      if (studentOverlap) {
+        throw new AppError(
+          `You already have an appointment scheduled during this time window (${studentOverlap.slot_date} ${studentOverlap.start_time.slice(0, 5)} - ${studentOverlap.end_time.slice(0, 5)}).`,
+          HTTP_STATUS.CONFLICT,
+          'STUDENT_SCHEDULE_CONFLICT'
+        );
+      }
 
       // 3. Concurrency Lock: Atomically reserve the proposed slot
       const lockProposed = await tx.execute(
@@ -708,7 +759,8 @@ const appointmentService = {
 
     const history = await db.query(
       `SELECT h.id, h.appointment_id, h.previous_status, h.new_status, h.notes,
-              h.changed_at, h.changed_by, u.email as changed_by_email,
+              h.changed_at, h.changed_at as created_at, h.changed_at as changed_at,
+              h.changed_by, u.email as changed_by_email,
               u.first_name, u.last_name, r.name as role_name
        FROM appointment_status_history h
        JOIN users u ON h.changed_by = u.id

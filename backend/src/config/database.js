@@ -37,6 +37,16 @@ function assertDatabaseSafety(targetDbFile) {
 // Enforce fail-fast safety check before initiating connection
 assertDatabaseSafety(env.db.file);
 
+// Ensure target directory exists for database file
+const dbDir = path.dirname(env.db.file);
+if (!fs.existsSync(dbDir)) {
+  try {
+    fs.mkdirSync(dbDir, { recursive: true });
+  } catch (dirErr) {
+    logger.warn(`[Database] Could not ensure directory exists: ${dbDir} (${dirErr.message})`);
+  }
+}
+
 let nativeDriver = null;
 
 // Attempt to load native drivers (better-sqlite3, node:sqlite, sqlite3)
@@ -307,6 +317,33 @@ const db = {
       postCommitCallbacks.length = 0;
     }
     return result;
+  },
+
+  /**
+   * Safely backup the live SQLite database using VACUUM INTO.
+   * Creates an atomic, consistent, non-locking backup even with WAL mode active.
+   * @param {string} destinationPath
+   */
+  async backup(destinationPath) {
+    if (!destinationPath || typeof destinationPath !== 'string') {
+      throw new Error('[Database] Valid destinationPath string is required for backup.');
+    }
+    const resolvedDest = path.resolve(destinationPath);
+    if (fs.existsSync(resolvedDest)) {
+      throw new Error(`[Database] Backup destination already exists: ${resolvedDest}. Cannot overwrite existing file.`);
+    }
+    const destDir = path.dirname(resolvedDest);
+    if (!fs.existsSync(destDir)) {
+      fs.mkdirSync(destDir, { recursive: true });
+    }
+    const escapedDest = resolvedDest.replace(/'/g, "''");
+    if (nativeDriver && nativeDriver.exec) {
+      nativeDriver.exec(`VACUUM INTO '${escapedDest}';`);
+    } else {
+      await this.execute(`VACUUM INTO '${escapedDest}';`);
+    }
+    logger.info(`[Database] Consistent backup created successfully at: ${resolvedDest}`);
+    return { path: resolvedDest };
   },
 
   /**

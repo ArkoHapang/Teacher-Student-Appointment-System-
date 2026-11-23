@@ -16,7 +16,7 @@ import { FormField, TextInput, Select } from '../../components/Form/Form';
 import { Table } from '../../components/Table/Table';
 import { Badge, UserStatusBadge } from '../../components/Badge/Badge';
 import { Alert } from '../../components/Alert/Alert';
-import { LoadingState, ErrorState } from '../../components/Feedback/Feedback';
+import { LoadingState, EmptyState, ErrorState } from '../../components/Feedback/Feedback';
 import { PaginationState, TableColumn, UserStatus } from '../../types/designSystem';
 
 export const UserAccountsView: React.FC = () => {
@@ -377,6 +377,11 @@ export const UserAccountsView: React.FC = () => {
           title="Could Not Load Users"
           message={errorMessage}
           onRetry={loadUsers}
+        />
+      ) : users.length === 0 ? (
+        <EmptyState
+          title="No User Accounts Found"
+          description="No user accounts are currently provisioned in the system."
         />
       ) : (
         <Table<AdminUserRecord>

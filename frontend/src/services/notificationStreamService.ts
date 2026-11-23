@@ -31,7 +31,11 @@ class NotificationStreamService {
   private eventSource: EventSource | null = null;
   private currentUserId: number | null = null;
   private listeners: Set<NotificationListener> = new Set();
-  private streamUrl = '/api/v1/notifications/stream';
+  
+  private getStreamUrl(): string {
+    // Strictly routes through same-origin Netlify /api/* proxy
+    return '/api/v1/notifications/stream';
+  }
 
   /**
    * Establish an SSE connection for the given authenticated user.
@@ -73,7 +77,7 @@ class NotificationStreamService {
 
     try {
       // Native browser EventSource with same-origin credentials
-      const es = new EventSource(this.streamUrl, {
+      const es = new EventSource(this.getStreamUrl(), {
         withCredentials: true
       });
 

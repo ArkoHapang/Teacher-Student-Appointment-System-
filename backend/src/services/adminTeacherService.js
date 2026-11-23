@@ -9,10 +9,13 @@
  * 6. Audit ledger recording for all administrative operations
  */
 
+const crypto = require('crypto');
 const db = require('../config/database');
 const HTTP_STATUS = require('../constants/httpStatusCodes');
 const { ROLES, USER_STATUS, APPOINTMENT_STATUS } = require('../constants/roles');
 const passwordService = require('./passwordService');
+const authTokenService = require('./authTokenService');
+const emailService = require('./emailService');
 const { AppError } = require('../middlewares/errorHandler');
 const logger = require('../config/logger');
 
@@ -291,8 +294,8 @@ const adminTeacherService = {
       designation,
       officeRoom,
       bio = '',
-      isVerified = 1,
-      status = USER_STATUS.ACTIVE,
+      isVerified,
+      status,
       courses = []
     } = data;
 
@@ -337,13 +340,28 @@ const adminTeacherService = {
       throw new AppError(`Department #${parsedDeptId} does not exist.`, HTTP_STATUS.BAD_REQUEST, 'DEPARTMENT_NOT_FOUND');
     }
 
-    // Password handling: use provided or generate strong default
-    const plainPassword = password && password.trim().length >= 8 ? password.trim() : 'TeacherPass123!';
-    const passwordHash = await passwordService.hashPassword(plainPassword);
+    // Determine onboarding mode vs explicit credential provisioning (Issue #60)
+    const isInviteMode = !password || data.sendInvitation === true;
+    let passwordHash;
+    let targetStatus;
+    let targetVerified;
 
-    // Status validation
-    const targetStatus = Object.values(USER_STATUS).includes(status) ? status : USER_STATUS.ACTIVE;
-    const targetVerified = isVerified ? 1 : 0;
+    if (isInviteMode) {
+      // Secure unverified onboarding flow: placeholder random entropy prevents pre-onboarding login
+      const placeholderEntropy = crypto.randomBytes(32).toString('hex');
+      passwordHash = await passwordService.hashPassword(placeholderEntropy);
+      targetStatus = status !== undefined ? status : USER_STATUS.PENDING_APPROVAL;
+      targetVerified = (data.isVerified !== undefined && data.isVerified !== null) ? (data.isVerified ? 1 : 0) : 0;
+    } else {
+      const plainPassword = password.trim();
+      const complexity = passwordService.validateComplexity(plainPassword);
+      if (!complexity.isValid) {
+        throw new AppError(complexity.message || 'Password does not meet complexity standards.', HTTP_STATUS.BAD_REQUEST, 'WEAK_PASSWORD');
+      }
+      passwordHash = await passwordService.hashPassword(plainPassword);
+      targetStatus = (status && Object.values(USER_STATUS).includes(status)) ? status : USER_STATUS.ACTIVE;
+      targetVerified = (data.isVerified !== undefined && data.isVerified !== null) ? (data.isVerified ? 1 : 0) : 1;
+    }
 
     return db.transaction(async (tx) => {
       // 1. Resolve role_id for TEACHER
@@ -367,6 +385,22 @@ const adminTeacherService = {
         [newUserId, parsedDeptId, designation.trim(), officeRoom.trim(), bio.trim(), targetVerified]
       );
       const newTeacherProfileId = profileResult.lastInsertRowid;
+
+      // 4. Issue Onboarding Invitation Token if invite mode
+      let invitationToken = null;
+      if (isInviteMode) {
+        const tokenRes = await authTokenService.createToken(newUserId, authTokenService.TOKEN_TYPES.TEACHER_INVITATION, 24 * 7, tx);
+        invitationToken = tokenRes.rawToken;
+        if (emailService.isEnabled()) {
+          try {
+            await emailService.sendTeacherInvitation(cleanEmail, invitationToken, `${firstName.trim()} ${lastName.trim()}`);
+          } catch (mailErr) {
+            logger.warn(`[AdminTeacherService] Failed to email teacher invitation: ${mailErr.message}`);
+          }
+        } else {
+          logger.info(`[AdminTeacherService] Email delivery disabled: invitation token created for ${cleanEmail} but not emailed.`);
+        }
+      }
 
       // 4. Insert optional initial courses
       const insertedCourses = [];
@@ -422,6 +456,7 @@ const adminTeacherService = {
         officeRoom: officeRoom.trim(),
         bio: bio.trim(),
         isVerified: targetVerified,
+        invitationToken: invitationToken || undefined,
         courses: insertedCourses
       };
     });

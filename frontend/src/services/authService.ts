@@ -119,5 +119,30 @@ export const authService = {
     this.setStoredUser(res.data.user);
     apiClient.resetUnauthorizedGuard();
     return res.data;
+  },
+
+  async forgotPassword(email: string): Promise<{ message: string }> {
+    const res = await apiClient.post<{ message: string }>('/api/v1/auth/forgot-password', { email });
+    return res.data;
+  },
+
+  async resetPassword(token: string, newPassword: string): Promise<{ message: string }> {
+    const res = await apiClient.post<{ message: string }>('/api/v1/auth/reset-password', { token, newPassword });
+    return res.data;
+  },
+
+  async verifyEmail(token: string): Promise<{ message: string }> {
+    const res = await apiClient.post<{ message: string }>('/api/v1/auth/verify-email', { token });
+    return res.data;
+  },
+
+  async resendVerification(email: string): Promise<{ message: string }> {
+    const res = await apiClient.post<{ message: string }>('/api/v1/auth/resend-verification', { email });
+    return res.data;
+  },
+
+  async onboardTeacher(token: string, password: string): Promise<{ message: string }> {
+    const res = await apiClient.post<{ message: string }>('/api/v1/auth/onboard-teacher', { token, password });
+    return res.data;
   }
 };

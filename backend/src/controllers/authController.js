@@ -173,6 +173,96 @@ const authController = {
         user: req.user
       }
     });
+  },
+
+  /**
+   * POST /api/v1/auth/forgot-password
+   * Request password recovery token link (anti-enumeration protected)
+   */
+  async forgotPassword(req, res, next) {
+    const { email } = req.body || {};
+    const ip = req.clientIp || resolveClientIp(req);
+    try {
+      const result = await authService.forgotPassword(email, ip);
+      return res.status(HTTP_STATUS.OK).json({
+        success: true,
+        message: result.message
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  /**
+   * POST /api/v1/auth/reset-password
+   * Set new password using single-use recovery token
+   */
+  async resetPassword(req, res, next) {
+    const { token, newPassword } = req.body || {};
+    const ip = req.clientIp || resolveClientIp(req);
+    try {
+      const result = await authService.resetPassword(token, newPassword, ip);
+      return res.status(HTTP_STATUS.OK).json({
+        success: true,
+        message: result.message
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  /**
+   * POST /api/v1/auth/verify-email
+   * Verify student email identity using registration verification token
+   */
+  async verifyEmail(req, res, next) {
+    const { token } = req.body || {};
+    const ip = req.clientIp || resolveClientIp(req);
+    try {
+      const result = await authService.verifyEmail(token, ip);
+      return res.status(HTTP_STATUS.OK).json({
+        success: true,
+        message: result.message
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  /**
+   * POST /api/v1/auth/resend-verification
+   * Resend student verification link if account pending
+   */
+  async resendVerification(req, res, next) {
+    const { email } = req.body || {};
+    const ip = req.clientIp || resolveClientIp(req);
+    try {
+      const result = await authService.resendVerification(email, ip);
+      return res.status(HTTP_STATUS.OK).json({
+        success: true,
+        message: result.message
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  /**
+   * POST /api/v1/auth/onboard-teacher
+   * Complete faculty onboarding by setting password via invitation token
+   */
+  async onboardTeacher(req, res, next) {
+    const { token, password } = req.body || {};
+    const ip = req.clientIp || resolveClientIp(req);
+    try {
+      const result = await authService.onboardTeacher(token, password, ip);
+      return res.status(HTTP_STATUS.OK).json({
+        success: true,
+        message: result.message
+      });
+    } catch (error) {
+      next(error);
+    }
   }
 };
 

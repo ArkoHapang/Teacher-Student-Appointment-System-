@@ -16,16 +16,18 @@ interface StudentLoginViewProps {
   sessionExpiredMessage?: string;
   onNavigateToRegister?: () => void;
   registeredSuccessMessage?: string;
+  onForgotPassword?: () => void;
 }
 
 export const StudentLoginView: React.FC<StudentLoginViewProps> = ({
   onLoginSuccess,
   sessionExpiredMessage,
   onNavigateToRegister,
-  registeredSuccessMessage
+  registeredSuccessMessage,
+  onForgotPassword
 }) => {
-  const [email, setEmail] = useState('alice.carter@student.university.edu');
-  const [password, setPassword] = useState('Password123!');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(sessionExpiredMessage || null);
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
@@ -152,7 +154,26 @@ export const StudentLoginView: React.FC<StudentLoginViewProps> = ({
             />
           </FormField>
 
-          <div style={{ marginTop: '24px' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '6px' }}>
+            {onForgotPassword && (
+              <button
+                type="button"
+                onClick={onForgotPassword}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--color-primary-700)',
+                  fontSize: 'var(--font-size-xs)',
+                  cursor: 'pointer',
+                  textDecoration: 'underline'
+                }}
+              >
+                Forgot Password?
+              </button>
+            )}
+          </div>
+
+          <div style={{ marginTop: '20px' }}>
             <Button
               type="submit"
               variant="primary"
@@ -184,11 +205,13 @@ export const StudentLoginView: React.FC<StudentLoginViewProps> = ({
           </div>
         )}
 
-        <div style={{ marginTop: '20px', padding: '12px', backgroundColor: 'var(--color-bg-surface-subtle)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
-          <strong>Demo Student Credentials:</strong><br />
-          Email: <code className="code-identifier">alice.carter@student.university.edu</code><br />
-          Password: <code className="code-identifier">Password123!</code>
-        </div>
+        {import.meta.env.DEV && (
+          <div style={{ marginTop: '20px', padding: '12px', backgroundColor: 'var(--color-bg-surface-subtle)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
+            <strong>Demo Student Credentials:</strong><br />
+            Email: <code className="code-identifier">alice.carter@student.university.edu</code><br />
+            Password: <code className="code-identifier">Password123!</code>
+          </div>
+        )}
       </div>
     </div>
   );
