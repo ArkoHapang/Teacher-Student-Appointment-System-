@@ -7,6 +7,7 @@ const env = require('./config/env');
 const logger = require('./config/logger');
 const db = require('./config/database');
 const migrationService = require('./services/migrationService');
+const adminBootstrapService = require('./services/adminBootstrapService');
 
 async function startServer() {
   try {
@@ -34,6 +35,9 @@ async function startServer() {
     } else {
       logger.info(`[Startup] Database schema up-to-date (${migrationStatus.appliedCount} migrations applied).`);
     }
+
+    // Administrator Credential Verification & Secure Bootstrap Gate (BLK-01)
+    await adminBootstrapService.ensureAdminProvisioned();
 
     // Start HTTP Server
     const server = app.listen(env.port, () => {

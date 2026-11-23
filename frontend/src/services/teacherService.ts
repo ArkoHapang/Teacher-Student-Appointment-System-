@@ -9,7 +9,8 @@ import {
   TeacherUser,
   TeacherSlotItem,
   TeacherAppointmentItem,
-  TeacherNotificationItem
+  TeacherNotificationItem,
+  ConsultationFeedback
 } from '../types/teacher';
 import { AppointmentHistoryRecord } from '../types/admin';
 
@@ -114,6 +115,19 @@ function normalizeHistory(raw: any): AppointmentHistoryRecord {
     newStatus: raw.newStatus ?? raw.new_status,
     changedBy: raw.changedBy ?? raw.changed_by,
     notes: raw.notes,
+    createdAt: raw.createdAt ?? raw.created_at ?? raw.changed_at ?? raw.changedAt
+  };
+}
+
+function normalizeFeedback(raw: any): ConsultationFeedback | null {
+  if (!raw) return null;
+  return {
+    id: raw.id,
+    appointmentId: raw.appointmentId ?? raw.appointment_id,
+    studentId: raw.studentId ?? raw.student_id,
+    teacherId: raw.teacherId ?? raw.teacher_id,
+    rating: Number(raw.rating),
+    comments: raw.comments !== undefined ? raw.comments : null,
     createdAt: raw.createdAt ?? raw.created_at
   };
 }
@@ -258,5 +272,27 @@ export const teacherService = {
       `/api/v1/users/${userId}/notifications`
     );
     return (res.data.notifications || []).map(normalizeNotification);
+  },
+
+  async markNotificationAsRead(userId: number, notificationId: number): Promise<TeacherNotificationItem> {
+    const res = await apiClient.patch<any>(
+      `/api/v1/users/${userId}/notifications/${notificationId}/read`
+    );
+    return normalizeNotification(res.data);
+  },
+
+  async markAllNotificationsAsRead(userId: number): Promise<{ recipientId: number; updatedCount: number }> {
+    const res = await apiClient.patch<{ recipientId: number; updatedCount: number }>(
+      `/api/v1/users/${userId}/notifications/read-all`
+    );
+    return res.data;
+  },
+
+  // -------------------------------------------------------------
+  // Consultation Feedback & Ratings (Phase 5)
+  // -------------------------------------------------------------
+  async getFeedback(appointmentId: number): Promise<ConsultationFeedback | null> {
+    const res = await apiClient.get<any>(`/api/v1/appointments/${appointmentId}/feedback`);
+    return normalizeFeedback(res.data);
   }
 };

@@ -11,6 +11,7 @@
  * 8. Concurrency & Race Condition Defense: Simultaneous booking requests for the same slot
  */
 
+require('./setup');
 const assert = require('assert');
 const request = require('supertest');
 const app = require('../src/app');
@@ -59,23 +60,30 @@ async function runAppointmentTests() {
   const createdSlotIds = [];
   const createdAppointmentIds = [];
 
+  // Dynamic future date generator (matching pattern from teacherWorkflows.test.js & studentWorkflows.test.js)
+  const baseDayOffset = Math.floor(Math.random() * 500) + 60;
+  const getFutureDate = (daysAhead = 0) => {
+    return new Date(Date.now() + 86400000 * (baseDayOffset + daysAhead)).toISOString().slice(0, 10);
+  };
+
   const createTestSlot = async ({
     teacherId = 1,
-    date = '2026-11-01',
+    date = null,
     start = '10:00:00',
     end = '10:30:00',
     isActive = 1,
     isBooked = 0
   } = {}) => {
-    const startTimestamp = `${date} ${start}`;
-    const endTimestamp = `${date} ${end}`;
+    const slotDate = date || getFutureDate(1);
+    const startTimestamp = `${slotDate} ${start}`;
+    const endTimestamp = `${slotDate} ${end}`;
 
     // Proactively clean up any stale matching slots from aborted prior test runs
     const existing = await db.query('SELECT id FROM teacher_availability_slots WHERE teacher_id = ? AND start_timestamp = ?;', [teacherId, startTimestamp]);
     for (const row of existing) {
       if (row.id > 6) {
         await db.execute('DELETE FROM appointment_status_history WHERE appointment_id IN (SELECT id FROM appointments WHERE slot_id = ?);', [row.id]);
-        await db.execute('DELETE FROM appointment_reschedules WHERE appointment_id IN (SELECT id FROM appointments WHERE slot_id = ?);', [row.id]);
+        await db.execute('DELETE FROM appointment_reschedules WHERE appointment_id IN (SELECT id FROM appointments WHERE slot_id = ?) OR original_slot_id = ? OR proposed_slot_id = ?;', [row.id, row.id, row.id]);
         await db.execute('DELETE FROM appointments WHERE slot_id = ?;', [row.id]);
         await db.execute('DELETE FROM teacher_availability_slots WHERE id = ?;', [row.id]);
       }
@@ -85,7 +93,7 @@ async function runAppointmentTests() {
       `INSERT INTO teacher_availability_slots
        (teacher_id, slot_date, start_time, end_time, start_timestamp, end_timestamp, is_booked, is_active)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
-      [teacherId, date, start, end, startTimestamp, endTimestamp, isBooked, isActive]
+      [teacherId, slotDate, start, end, startTimestamp, endTimestamp, isBooked, isActive]
     );
     createdSlotIds.push(res.lastInsertRowid);
     return res.lastInsertRowid;
@@ -101,7 +109,7 @@ async function runAppointmentTests() {
     let testSlot1 = null;
 
     await test('Student successfully creates appointment request for an available slot', async () => {
-      testSlot1 = await createTestSlot({ teacherId: 1, date: '2026-11-02', start: '09:00:00', end: '09:30:00' });
+      testSlot1 = await createTestSlot({ teacherId: 1, date: getFutureDate(2), start: '09:00:00', end: '09:30:00' });
 
       const res = await request(app)
         .post('/api/v1/appointments')
@@ -164,7 +172,7 @@ async function runAppointmentTests() {
     });
 
     await test('Rejects booking a past availability slot with 400 Bad Request', async () => {
-      const pastSlot = await createTestSlot({ teacherId: 1, date: '2026-01-01', start: '10:00:00', end: '10:30:00' });
+      const pastSlot = await createTestSlot({ teacherId: 1, date: '2020-01-01', start: '10:00:00', end: '10:30:00' });
 
       const res = await request(app)
         .post('/api/v1/appointments')
@@ -180,7 +188,7 @@ async function runAppointmentTests() {
     });
 
     await test('Rejects booking a slot with invalid duration (< 10 minutes) with 400 Bad Request', async () => {
-      const tooShortSlot = await createTestSlot({ teacherId: 1, date: '2026-11-03', start: '10:00:00', end: '10:05:00' });
+      const tooShortSlot = await createTestSlot({ teacherId: 1, date: getFutureDate(3), start: '10:00:00', end: '10:05:00' });
 
       const res = await request(app)
         .post('/api/v1/appointments')
@@ -196,7 +204,7 @@ async function runAppointmentTests() {
     });
 
     await test('Rejects appointment creation by a Teacher role (only students book appointments)', async () => {
-      const slotForTeacher = await createTestSlot({ teacherId: 1, date: '2026-11-04', start: '14:00:00', end: '14:30:00' });
+      const slotForTeacher = await createTestSlot({ teacherId: 1, date: getFutureDate(4), start: '14:00:00', end: '14:30:00' });
 
       const res = await request(app)
         .post('/api/v1/appointments')
@@ -337,7 +345,7 @@ async function runAppointmentTests() {
 
     await test('Teacher rejection: rejects PENDING appointment and releases slot back to unbooked', async () => {
       // 1. Create a fresh PENDING appointment
-      const rejSlot = await createTestSlot({ teacherId: 1, date: '2026-11-05', start: '11:00:00', end: '11:30:00' });
+      const rejSlot = await createTestSlot({ teacherId: 1, date: getFutureDate(5), start: '11:00:00', end: '11:30:00' });
       const createRes = await request(app)
         .post('/api/v1/appointments')
         .set('Authorization', `Bearer ${studentDavidToken}`)
@@ -380,7 +388,7 @@ async function runAppointmentTests() {
 
     await test('Attempting to complete a PENDING appointment directly without approval is blocked with 400 Bad Request', async () => {
       // Create fresh PENDING appointment
-      const pendSlot = await createTestSlot({ teacherId: 1, date: '2026-11-12', start: '16:00:00', end: '16:30:00' });
+      const pendSlot = await createTestSlot({ teacherId: 1, date: getFutureDate(6), start: '16:00:00', end: '16:30:00' });
       const createRes = await request(app)
         .post('/api/v1/appointments')
         .set('Authorization', `Bearer ${studentAliceToken}`)
@@ -426,7 +434,7 @@ async function runAppointmentTests() {
 
     await test('Student owner cancels appointment: transitions to CANCELLED and releases slot', async () => {
       // Create fresh appointment to cancel
-      const cancelSlot = await createTestSlot({ teacherId: 1, date: '2026-11-06', start: '15:00:00', end: '15:30:00' });
+      const cancelSlot = await createTestSlot({ teacherId: 1, date: getFutureDate(7), start: '15:00:00', end: '15:30:00' });
       const createRes = await request(app)
         .post('/api/v1/appointments')
         .set('Authorization', `Bearer ${studentAliceToken}`)
@@ -478,8 +486,8 @@ async function runAppointmentTests() {
     let targetSlot = null;
 
     await test('Setup appointment for rescheduling tests', async () => {
-      originalSlot = await createTestSlot({ teacherId: 1, date: '2026-11-07', start: '10:00:00', end: '10:30:00' });
-      targetSlot = await createTestSlot({ teacherId: 1, date: '2026-11-07', start: '11:00:00', end: '11:30:00' });
+      originalSlot = await createTestSlot({ teacherId: 1, date: getFutureDate(8), start: '10:00:00', end: '10:30:00' });
+      targetSlot = await createTestSlot({ teacherId: 1, date: getFutureDate(8), start: '11:00:00', end: '11:30:00' });
 
       const createRes = await request(app)
         .post('/api/v1/appointments')
@@ -500,7 +508,7 @@ async function runAppointmentTests() {
 
     await test('Rejects reschedule to a slot belonging to a DIFFERENT teacher with 400 Bad Request', async () => {
       // Slot belongs to Teacher 2 (Dr. Jenkins), but appointment is with Teacher 1
-      const differentTeacherSlot = await createTestSlot({ teacherId: 2, date: '2026-11-08', start: '14:00:00', end: '14:30:00' });
+      const differentTeacherSlot = await createTestSlot({ teacherId: 2, date: getFutureDate(9), start: '14:00:00', end: '14:30:00' });
 
       const res = await request(app)
         .post(`/api/v1/appointments/${reschedApptId}/reschedule`)
@@ -630,7 +638,7 @@ async function runAppointmentTests() {
       // 1. Create a single clean test slot
       const raceSlot = await createTestSlot({
         teacherId: 1,
-        date: '2026-11-10',
+        date: getFutureDate(10),
         start: '13:00:00',
         end: '13:30:00'
       });
@@ -697,6 +705,7 @@ async function runAppointmentTests() {
       await db.execute('DELETE FROM appointments WHERE id = ?;', [apptId]);
     }
     for (const slotId of createdSlotIds) {
+      await db.execute('DELETE FROM appointment_reschedules WHERE original_slot_id = ? OR proposed_slot_id = ?;', [slotId, slotId]);
       await db.execute('DELETE FROM teacher_availability_slots WHERE id = ?;', [slotId]);
     }
   }

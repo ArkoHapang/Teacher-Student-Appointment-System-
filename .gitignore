@@ -29,6 +29,9 @@ obj/
 .dotnet/
 out/
 
+# Netlify local state
+.netlify/
+
 # IDE & OS Artifacts
 .idea/
 .vscode/

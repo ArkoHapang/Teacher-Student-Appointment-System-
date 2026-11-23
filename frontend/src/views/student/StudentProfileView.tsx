@@ -166,7 +166,22 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
 
           <div>
             <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>Academic Batch</div>
-            <div style={{ fontWeight: 500 }}>{profile?.profile?.batch ? `Class of ${profile.profile.batch}` : 'Standard'}</div>
+            <div style={{ fontWeight: 500 }}>
+              {profile?.profile?.batch
+                ? (/^class of/i.test(profile.profile.batch)
+                    ? profile.profile.batch
+                    : /^batch\s+/i.test(profile.profile.batch)
+                    ? profile.profile.batch
+                    : `Batch ${profile.profile.batch}`)
+                : 'Standard'}
+            </div>
+          </div>
+
+          <div>
+            <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>Contact Phone</div>
+            <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-body)' }}>
+              {profile?.profile?.phoneNumber || 'Not provided'}
+            </div>
           </div>
 
           <div>
@@ -186,7 +201,7 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
           <div>
             <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>Role Authorization</div>
             <div style={{ marginTop: '4px' }}>
-              <Badge variant="info">Verified Student</Badge>
+              <Badge variant="info">Student Account</Badge>
             </div>
           </div>
         </div>

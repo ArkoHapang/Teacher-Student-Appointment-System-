@@ -1,5 +1,5 @@
 app = "ts-appointment-system"
-primary_region = "iad"
+primary_region = "sin"
 
 [build]
   dockerfile = "Dockerfile"

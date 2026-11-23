@@ -14,6 +14,7 @@ const { ROLES, APPOINTMENT_STATUS } = require('../constants/roles');
 const { isValidTransition, isTerminalStatus } = require('../constants/appointmentLifecycle');
 const slotService = require('./slotService');
 const conflictService = require('./conflictService');
+const notificationService = require('./notificationService');
 const { AppError } = require('../middlewares/errorHandler');
 const logger = require('../config/logger');
 
@@ -77,6 +78,26 @@ const appointmentService = {
       // 2. Conflict Detection: Assert no overlapping appointments exist for this teacher
       await conflictService.assertNoConflict({ slotId, tx });
 
+      // Student Conflict Check: Ensure student does not have another active appointment overlapping this slot
+      const studentOverlap = await tx.queryOne(
+        `SELECT a.id, a.title, s.slot_date, s.start_time, s.end_time
+         FROM appointments a
+         JOIN teacher_availability_slots s ON a.slot_id = s.id
+         WHERE a.student_id = ?
+           AND a.status IN ('PENDING', 'APPROVED', 'RESCHEDULE_PENDING')
+           AND s.start_timestamp < ?
+           AND ? < s.end_timestamp
+         LIMIT 1;`,
+        [studentProfile.id, slot.end_timestamp, slot.start_timestamp]
+      );
+      if (studentOverlap) {
+        throw new AppError(
+          `You already have an appointment scheduled during this time window (${studentOverlap.slot_date} ${studentOverlap.start_time.slice(0, 5)} - ${studentOverlap.end_time.slice(0, 5)}).`,
+          HTTP_STATUS.CONFLICT,
+          'STUDENT_SCHEDULE_CONFLICT'
+        );
+      }
+
       // 3. Concurrency Lock: Atomic conditional slot booking
       // If another transaction booked this slot between read and write, changes will be 0
       const lockResult = await tx.execute(
@@ -107,6 +128,34 @@ const appointmentService = {
          VALUES (?, NULL, 'PENDING', ?, ?);`,
         [appointmentId, user.id, 'Appointment requested by student']
       );
+
+      // 5. Dispatch notification to assigned teacher
+      let studentName = `${user.firstName || ''} ${user.lastName || ''}`.trim();
+      if (!studentName) {
+        const studentUser = await tx.queryOne(
+          'SELECT first_name, last_name FROM users WHERE id = ?;',
+          [user.id]
+        );
+        if (studentUser) {
+          studentName = `${studentUser.first_name || ''} ${studentUser.last_name || ''}`.trim();
+        }
+      }
+      studentName = studentName || 'A student';
+
+      const bookingTime = slot.start_time ? ` at ${slot.start_time}` : '';
+      const bookingDate = slot.slot_date ? ` on ${slot.slot_date}` : '';
+
+      const teacherRecipientId = slot.teacher_user_id || (
+        await tx.queryOne('SELECT user_id FROM teacher_profiles WHERE id = ?;', [slot.teacher_id])
+      )?.user_id;
+
+      await notificationService.createNotification(tx, {
+        recipientId: teacherRecipientId,
+        appointmentId,
+        title: 'New Appointment Request',
+        message: `${studentName} requested an appointment${bookingDate}${bookingTime}. Subject: ${title.trim()}`,
+        type: notificationService.NOTIFICATION_TYPES.BOOKING_REQUEST
+      });
 
       logger.info(`[AppointmentService] Appointment #${appointmentId} requested by User #${user.id} for Slot #${slotId}`);
 
@@ -277,6 +326,21 @@ const appointmentService = {
         [appointmentId, appointment.status, user.id, notes || 'Appointment approved by faculty member']
       );
 
+      // Dispatch notification to student
+      const slotTimeInfo = appointment.slot_date && appointment.start_time
+        ? ` scheduled for ${appointment.slot_date} at ${appointment.start_time}`
+        : '';
+      const teacherName = `${appointment.teacher_first_name || ''} ${appointment.teacher_last_name || ''}`.trim();
+      const approverInfo = teacherName ? ` by ${teacherName}` : '';
+
+      await notificationService.createNotification(tx, {
+        recipientId: appointment.student_user_id,
+        appointmentId,
+        title: 'Appointment Approved',
+        message: `Your appointment request '${appointment.title}'${slotTimeInfo} has been approved${approverInfo}.`,
+        type: notificationService.NOTIFICATION_TYPES.STATUS_UPDATE
+      });
+
       logger.info(`[AppointmentService] Appointment #${appointmentId} APPROVED by User #${user.id}`);
 
       return {
@@ -335,6 +399,20 @@ const appointmentService = {
         [appointmentId, appointment.status, user.id, notes || reason || 'Appointment rejected by faculty member']
       );
 
+      // Dispatch notification to student with reason if available
+      const rejectionReason = reason || notes || null;
+      const teacherName = `${appointment.teacher_first_name || ''} ${appointment.teacher_last_name || ''}`.trim();
+      const rejectorInfo = teacherName ? ` by ${teacherName}` : '';
+      const reasonSuffix = rejectionReason ? ` Reason: ${rejectionReason}` : '';
+
+      await notificationService.createNotification(tx, {
+        recipientId: appointment.student_user_id,
+        appointmentId,
+        title: 'Appointment Rejected',
+        message: `Your appointment request '${appointment.title}' was rejected${rejectorInfo}.${reasonSuffix}`,
+        type: notificationService.NOTIFICATION_TYPES.STATUS_UPDATE
+      });
+
       logger.info(`[AppointmentService] Appointment #${appointmentId} REJECTED by User #${user.id}. Slot #${appointment.slot_id} released.`);
 
       return {
@@ -385,6 +463,16 @@ const appointmentService = {
         );
       }
 
+      // Past appointment check: Cannot cancel if scheduled consultation time has already elapsed
+      const slotEndMs = new Date(appointment.end_timestamp || `${appointment.slot_date} ${appointment.end_time}`).getTime();
+      if (!isNaN(slotEndMs) && slotEndMs <= Date.now()) {
+        throw new AppError(
+          'Cannot cancel a past appointment whose consultation time has already elapsed.',
+          HTTP_STATUS.BAD_REQUEST,
+          'CANNOT_CANCEL_PAST_APPOINTMENT'
+        );
+      }
+
       // 1. Mark appointment as CANCELLED
       await tx.execute(
         `UPDATE appointments
@@ -405,6 +493,32 @@ const appointmentService = {
          VALUES (?, ?, 'CANCELLED', ?, ?);`,
         [appointmentId, appointment.status, user.id, `Cancelled: ${cancellationReason.trim()}`]
       );
+
+      // Dispatch notification to affected counterparty (or both if Admin)
+      const recipients = [];
+      if (isAdmin) {
+        recipients.push(appointment.student_user_id, appointment.teacher_user_id);
+      } else if (isOwnerStudent) {
+        recipients.push(appointment.teacher_user_id);
+      } else if (isAssignedTeacher) {
+        recipients.push(appointment.student_user_id);
+      }
+
+      const uniqueRecipients = Array.from(new Set(recipients));
+      const reasonSuffix = cancellationReason ? ` Reason: ${cancellationReason.trim()}` : '';
+      const slotTimeInfo = appointment.slot_date && appointment.start_time
+        ? ` scheduled for ${appointment.slot_date} at ${appointment.start_time}`
+        : '';
+
+      for (const recipientId of uniqueRecipients) {
+        await notificationService.createNotification(tx, {
+          recipientId,
+          appointmentId,
+          title: 'Appointment Cancelled',
+          message: `The appointment '${appointment.title}'${slotTimeInfo} has been cancelled.${reasonSuffix}`,
+          type: notificationService.NOTIFICATION_TYPES.STATUS_UPDATE
+        });
+      }
 
       logger.info(`[AppointmentService] Appointment #${appointmentId} CANCELLED by User #${user.id}. Slot #${appointment.slot_id} released.`);
 
@@ -481,6 +595,27 @@ const appointmentService = {
       // 2. Conflict Detection: Assert no overlapping appointments exist for this teacher, ignoring the appointment being rescheduled
       await conflictService.assertNoConflict({ slotId: proposedSlotId, excludeAppointmentId: appointmentId, tx });
 
+      // Student Conflict Check: Ensure student does not have another active appointment overlapping this proposed slot
+      const studentOverlap = await tx.queryOne(
+        `SELECT a.id, a.title, s.slot_date, s.start_time, s.end_time
+         FROM appointments a
+         JOIN teacher_availability_slots s ON a.slot_id = s.id
+         WHERE a.student_id = ?
+           AND a.id != ?
+           AND a.status IN ('PENDING', 'APPROVED', 'RESCHEDULE_PENDING')
+           AND s.start_timestamp < ?
+           AND ? < s.end_timestamp
+         LIMIT 1;`,
+        [appointment.student_id, appointmentId, proposedSlot.end_timestamp, proposedSlot.start_timestamp]
+      );
+      if (studentOverlap) {
+        throw new AppError(
+          `You already have an appointment scheduled during this time window (${studentOverlap.slot_date} ${studentOverlap.start_time.slice(0, 5)} - ${studentOverlap.end_time.slice(0, 5)}).`,
+          HTTP_STATUS.CONFLICT,
+          'STUDENT_SCHEDULE_CONFLICT'
+        );
+      }
+
       // 3. Concurrency Lock: Atomically reserve the proposed slot
       const lockProposed = await tx.execute(
         'UPDATE teacher_availability_slots SET is_booked = 1 WHERE id = ? AND is_booked = 0;',
@@ -528,6 +663,30 @@ const appointmentService = {
           `Rescheduled from slot #${appointment.slot_id} to #${proposedSlotId}. Reason: ${reason.trim()}`
         ]
       );
+
+      // Dispatch notification to counterparty (or both if Admin)
+      const recipients = [];
+      if (isAdmin) {
+        recipients.push(appointment.student_user_id, appointment.teacher_user_id);
+      } else if (isOwnerStudent) {
+        recipients.push(appointment.teacher_user_id);
+      } else if (isAssignedTeacher) {
+        recipients.push(appointment.student_user_id);
+      }
+
+      const uniqueRecipients = Array.from(new Set(recipients));
+      const newScheduleInfo = `to ${proposedSlot.slot_date} at ${proposedSlot.start_time}`;
+      const reasonSuffix = reason && reason.trim() ? ` Reason: ${reason.trim()}` : '';
+
+      for (const recipientId of uniqueRecipients) {
+        await notificationService.createNotification(tx, {
+          recipientId,
+          appointmentId,
+          title: 'Appointment Rescheduled',
+          message: `The appointment '${appointment.title}' has been rescheduled ${newScheduleInfo}.${reasonSuffix}`,
+          type: notificationService.NOTIFICATION_TYPES.RESCHEDULE_REQUEST
+        });
+      }
 
       logger.info(`[AppointmentService] Appointment #${appointmentId} rescheduled to Slot #${proposedSlotId} by User #${user.id}`);
 
@@ -600,7 +759,8 @@ const appointmentService = {
 
     const history = await db.query(
       `SELECT h.id, h.appointment_id, h.previous_status, h.new_status, h.notes,
-              h.changed_at, h.changed_by, u.email as changed_by_email,
+              h.changed_at, h.changed_at as created_at, h.changed_at as changed_at,
+              h.changed_by, u.email as changed_by_email,
               u.first_name, u.last_name, r.name as role_name
        FROM appointment_status_history h
        JOIN users u ON h.changed_by = u.id

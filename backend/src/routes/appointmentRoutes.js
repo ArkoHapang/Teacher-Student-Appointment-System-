@@ -52,6 +52,20 @@ const rescheduleAppointmentSchema = {
   }
 };
 
+const submitFeedbackSchema = {
+  rating: {
+    required: true,
+    type: 'number',
+    min: 1,
+    max: 5
+  },
+  comments: {
+    required: false,
+    type: 'string',
+    maxLength: 1000
+  }
+};
+
 // All appointment operations require authentication
 router.use(authenticate);
 
@@ -66,5 +80,7 @@ router.post('/:id/cancel', validate(cancelAppointmentSchema), appointmentControl
 router.post('/:id/reschedule', validate(rescheduleAppointmentSchema), appointmentController.reschedule);
 router.post('/:id/complete', appointmentController.complete);
 router.get('/:id/history', appointmentController.history);
+router.post('/:id/feedback', validate(submitFeedbackSchema), appointmentController.submitFeedback);
+router.get('/:id/feedback', appointmentController.getFeedback);
 
 module.exports = router;

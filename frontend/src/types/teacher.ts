@@ -82,3 +82,5 @@ export interface TeacherNotificationItem {
   isRead: number;
   createdAt: string;
 }
+
+export type { ConsultationFeedback, SubmitFeedbackPayload, FeedbackFetchState } from './student';

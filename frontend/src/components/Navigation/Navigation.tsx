@@ -154,16 +154,18 @@ export interface HeaderProps {
   onToggleTheme: () => void;
   onLogout: () => void;
   onOpenMobileMenu?: () => void;
+  onBrandClick?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   currentRole,
-  userName = 'Dr. Robert Miller',
-  userEmail = 'robert.miller@university.edu',
+  userName = 'User',
+  userEmail = '',
   theme,
   onToggleTheme,
   onLogout,
-  onOpenMobileMenu
+  onOpenMobileMenu,
+  onBrandClick
 }) => {
   return (
     <header className="ui-header">
@@ -171,7 +173,7 @@ export const Header: React.FC<HeaderProps> = ({
         {onOpenMobileMenu && (
           <button
             type="button"
-            className="ui-button ui-button--ghost ui-button--sm"
+            className="ui-button ui-button--ghost ui-button--sm ui-header__menu-toggle"
             onClick={onOpenMobileMenu}
             aria-label="Open navigation menu"
             style={{ color: '#FFFFFF', padding: '6px' }}
@@ -179,7 +181,17 @@ export const Header: React.FC<HeaderProps> = ({
             <MenuIcon size={22} />
           </button>
         )}
-        <a href="#home" className="ui-header__brand">
+        <a
+          href="#home"
+          className="ui-header__brand"
+          onClick={e => {
+            if (onBrandClick) {
+              e.preventDefault();
+              onBrandClick();
+            }
+          }}
+          aria-label="Return to system home"
+        >
           <div className="ui-header__brand-mark" aria-hidden="true">
             U
           </div>
@@ -230,12 +242,14 @@ export interface RoleNavProps {
   currentRole: UserRole;
   activeItemId: string;
   onSelectItem: (itemId: string) => void;
+  unreadNotificationsCount?: number;
 }
 
 export const RoleNav: React.FC<RoleNavProps> = ({
   currentRole,
   activeItemId,
-  onSelectItem
+  onSelectItem,
+  unreadNotificationsCount
 }) => {
   const config = ROLE_NAVIGATION_CONFIGS[currentRole];
 
@@ -244,6 +258,15 @@ export const RoleNav: React.FC<RoleNavProps> = ({
       <ul className="ui-role-nav__list">
         {config.items.map(item => {
           const isActive = item.id === activeItemId;
+          const isNotificationItem = item.id === 'student-notifications' || item.id === 'teacher-notifications';
+          const dynamicBadge = isNotificationItem
+            ? unreadNotificationsCount && unreadNotificationsCount > 0
+              ? unreadNotificationsCount > 99
+                ? '99+'
+                : unreadNotificationsCount
+              : undefined
+            : item.badge;
+
           return (
             <li key={item.id}>
               <button
@@ -254,8 +277,8 @@ export const RoleNav: React.FC<RoleNavProps> = ({
               >
                 {getNavIcon(item.icon)}
                 <span>{item.label}</span>
-                {item.badge !== undefined && (
-                  <span className="ui-role-nav__badge">{item.badge}</span>
+                {dynamicBadge !== undefined && (
+                  <span className="ui-role-nav__badge">{dynamicBadge}</span>
                 )}
               </button>
             </li>
@@ -272,6 +295,7 @@ export interface MobileNavProps {
   currentRole: UserRole;
   activeItemId: string;
   onSelectItem: (itemId: string) => void;
+  unreadNotificationsCount?: number;
 }
 
 export const MobileNav: React.FC<MobileNavProps> = ({
@@ -279,8 +303,21 @@ export const MobileNav: React.FC<MobileNavProps> = ({
   onClose,
   currentRole,
   activeItemId,
-  onSelectItem
+  onSelectItem,
+  unreadNotificationsCount
 }) => {
+  // Listen for Escape key to close mobile drawer (Issue #45)
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const config = ROLE_NAVIGATION_CONFIGS[currentRole];
@@ -314,6 +351,15 @@ export const MobileNav: React.FC<MobileNavProps> = ({
         <ul className="ui-mobile-nav__list">
           {config.items.map(item => {
             const isActive = item.id === activeItemId;
+            const isNotificationItem = item.id === 'student-notifications' || item.id === 'teacher-notifications';
+            const dynamicBadge = isNotificationItem
+              ? unreadNotificationsCount && unreadNotificationsCount > 0
+                ? unreadNotificationsCount > 99
+                  ? '99+'
+                  : unreadNotificationsCount
+                : undefined
+              : item.badge;
+
             return (
               <li key={item.id}>
                 <button
@@ -328,8 +374,8 @@ export const MobileNav: React.FC<MobileNavProps> = ({
                 >
                   {getNavIcon(item.icon)}
                   <span style={{ flex: 1, textAlign: 'left' }}>{item.label}</span>
-                  {item.badge !== undefined && (
-                    <span className="ui-role-nav__badge">{item.badge}</span>
+                  {dynamicBadge !== undefined && (
+                    <span className="ui-role-nav__badge">{dynamicBadge}</span>
                   )}
                 </button>
               </li>

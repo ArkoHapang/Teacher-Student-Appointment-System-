@@ -12,6 +12,7 @@
  * 9. Server-enforced RBAC restrictions (cannot manage other teachers or access admin endpoints)
  */
 
+require('./setup');
 const assert = require('assert');
 const http = require('http');
 const app = require('../src/app');
@@ -159,6 +160,16 @@ async function runTeacherWorkflowTests() {
     const uniqueDayOffset = Math.floor(Math.random() * 800) + 120;
     const testDate = new Date(Date.now() + 86400000 * uniqueDayOffset).toISOString().slice(0, 10);
     const testDate2 = new Date(Date.now() + 86400000 * (uniqueDayOffset + 1)).toISOString().slice(0, 10);
+
+    // Clean up residual test slots on these dates to prevent intermittent collision
+    await db.execute(
+      'DELETE FROM appointments WHERE slot_id IN (SELECT id FROM teacher_availability_slots WHERE teacher_id = ? AND slot_date IN (?, ?));',
+      [robertTeacherProfile.id, testDate, testDate2]
+    );
+    await db.execute(
+      'DELETE FROM teacher_availability_slots WHERE teacher_id = ? AND slot_date IN (?, ?);',
+      [robertTeacherProfile.id, testDate, testDate2]
+    );
 
     await test('Workflow 2: Configure new availability slot with validation', async () => {
       const res = await makeRequest(

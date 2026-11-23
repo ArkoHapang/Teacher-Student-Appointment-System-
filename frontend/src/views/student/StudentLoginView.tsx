@@ -14,14 +14,20 @@ import { StudentUser } from '../../types/student';
 interface StudentLoginViewProps {
   onLoginSuccess: (user: StudentUser) => void;
   sessionExpiredMessage?: string;
+  onNavigateToRegister?: () => void;
+  registeredSuccessMessage?: string;
+  onForgotPassword?: () => void;
 }
 
 export const StudentLoginView: React.FC<StudentLoginViewProps> = ({
   onLoginSuccess,
-  sessionExpiredMessage
+  sessionExpiredMessage,
+  onNavigateToRegister,
+  registeredSuccessMessage,
+  onForgotPassword
 }) => {
-  const [email, setEmail] = useState('alice.carter@student.university.edu');
-  const [password, setPassword] = useState('Password123!');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(sessionExpiredMessage || null);
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
@@ -95,6 +101,14 @@ export const StudentLoginView: React.FC<StudentLoginViewProps> = ({
           </p>
         </div>
 
+        {registeredSuccessMessage && (
+          <div style={{ marginBottom: '16px' }}>
+            <Alert variant="success" title="Registration Completed">
+              {registeredSuccessMessage}
+            </Alert>
+          </div>
+        )}
+
         {errorMessage && (
           <div style={{ marginBottom: '16px' }}>
             <Alert variant="error" title="Sign In Notice">
@@ -140,7 +154,26 @@ export const StudentLoginView: React.FC<StudentLoginViewProps> = ({
             />
           </FormField>
 
-          <div style={{ marginTop: '24px' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '6px' }}>
+            {onForgotPassword && (
+              <button
+                type="button"
+                onClick={onForgotPassword}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--color-primary-700)',
+                  fontSize: 'var(--font-size-xs)',
+                  cursor: 'pointer',
+                  textDecoration: 'underline'
+                }}
+              >
+                Forgot Password?
+              </button>
+            )}
+          </div>
+
+          <div style={{ marginTop: '20px' }}>
             <Button
               type="submit"
               variant="primary"
@@ -154,11 +187,31 @@ export const StudentLoginView: React.FC<StudentLoginViewProps> = ({
           </div>
         </form>
 
-        <div style={{ marginTop: '20px', padding: '12px', backgroundColor: 'var(--color-bg-surface-subtle)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
-          <strong>Demo Student Credentials:</strong><br />
-          Email: <code className="code-identifier">alice.carter@student.university.edu</code><br />
-          Password: <code className="code-identifier">Password123!</code>
-        </div>
+        {onNavigateToRegister && (
+          <div style={{ marginTop: '20px', textAlign: 'center', borderTop: '1px solid var(--color-border-subtle)', paddingTop: '16px' }}>
+            <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-muted)', marginBottom: '8px' }}>
+              Don't have a student account?
+            </p>
+            <Button
+              type="button"
+              variant="secondary"
+              size="md"
+              fullWidth
+              onClick={onNavigateToRegister}
+              disabled={isLoading}
+            >
+              Register New Student Account
+            </Button>
+          </div>
+        )}
+
+        {import.meta.env.DEV && (
+          <div style={{ marginTop: '20px', padding: '12px', backgroundColor: 'var(--color-bg-surface-subtle)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
+            <strong>Demo Student Credentials:</strong><br />
+            Email: <code className="code-identifier">alice.carter@student.university.edu</code><br />
+            Password: <code className="code-identifier">Password123!</code>
+          </div>
+        )}
       </div>
     </div>
   );

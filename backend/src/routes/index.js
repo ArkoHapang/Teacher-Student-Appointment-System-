@@ -11,6 +11,8 @@ const adminRoutes = require('./adminRoutes');
 const userRoutes = require('./userRoutes');
 const teacherRoutes = require('./teacherRoutes');
 const appointmentRoutes = require('./appointmentRoutes');
+const departmentRoutes = require('./departmentRoutes');
+const notificationRoutes = require('./notificationRoutes');
 
 // Mount diagnostics & health check endpoints
 router.use('/', healthRoutes);
@@ -21,6 +23,8 @@ router.use('/admin', adminRoutes);
 router.use('/users', userRoutes);
 router.use('/teachers', teacherRoutes);
 router.use('/appointments', appointmentRoutes);
+router.use('/departments', departmentRoutes);
+router.use('/notifications', notificationRoutes);
 
 // Meta endpoint describing API catalog
 router.get('/', (req, res) => {
@@ -35,11 +39,13 @@ router.get('/', (req, res) => {
         health: '/api/v1/health',
         ready: '/api/v1/ready',
         auth: {
+          register: 'POST /api/v1/auth/register',
           login: 'POST /api/v1/auth/login',
           logout: 'POST /api/v1/auth/logout',
           me: 'GET /api/v1/auth/me',
           verify: 'GET /api/v1/auth/verify'
         },
+        departments: 'GET /api/v1/departments',
         admin: {
           users: 'GET /api/v1/admin/users',
           updateStatus: 'PATCH /api/v1/admin/users/:id/status',
@@ -66,6 +72,9 @@ router.get('/', (req, res) => {
           list: 'GET /api/v1/teachers',
           details: 'GET /api/v1/teachers/:id',
           update: 'PATCH /api/v1/teachers/:id'
+        },
+        notifications: {
+          stream: 'GET /api/v1/notifications/stream'
         }
       }
     }

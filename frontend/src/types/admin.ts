@@ -179,3 +179,58 @@ export interface ApiErrorPayload {
   message: string;
   details?: unknown[];
 }
+
+export interface AdminUserRecord {
+  id: number;
+  email: string;
+  first_name: string;
+  last_name: string;
+  status: UserStatus;
+  created_at: string;
+  role_name: string;
+}
+
+export interface AuditLogRecord {
+  id: number;
+  actor_id: number;
+  action: string;
+  entity_type: string;
+  entity_id: string;
+  details: string;
+  ip_address: string;
+  created_at: string;
+  actor_email: string;
+  first_name: string;
+  last_name: string;
+}
+
+export interface SystemHealthData {
+  status: string;
+  service: string;
+  timestamp: string;
+  uptimeSeconds: number;
+  environment: string;
+  memoryUsage: {
+    rssMb: number;
+    heapUsedMb: number;
+  };
+}
+
+export interface SystemReadinessData {
+  status: string;
+  timestamp: string;
+  checks: {
+    database: {
+      connected: boolean;
+      latencyMs: number;
+      path: string;
+    };
+    migrations: {
+      isUpToDate: boolean;
+      totalAvailable: number;
+      appliedCount: number;
+      pendingCount: number;
+      pending: string[];
+    };
+  };
+}

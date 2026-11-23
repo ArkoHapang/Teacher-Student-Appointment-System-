@@ -12,6 +12,7 @@
  * 8. Audit trail logging for all logout actions in `audit_logs`.
  */
 
+require('./setup');
 const assert = require('assert');
 const request = require('supertest');
 const jwt = require('jsonwebtoken');

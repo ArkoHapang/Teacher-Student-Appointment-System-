@@ -13,7 +13,7 @@ export type AppointmentStatus =
   | 'COMPLETED'
   | 'RESCHEDULE_PENDING';
 
-export type UserStatus = 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
+export type UserStatus = 'ACTIVE' | 'INACTIVE' | 'SUSPENDED' | 'PENDING_APPROVAL';
 
 export type BadgeVariant =
   | 'pending'

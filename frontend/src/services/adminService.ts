@@ -12,8 +12,13 @@ import {
   ConflictDetectionResult,
   Department,
   CreateTeacherPayload,
-  UpdateTeacherPayload
+  UpdateTeacherPayload,
+  AdminUserRecord,
+  AuditLogRecord,
+  SystemHealthData,
+  SystemReadinessData
 } from '../types/admin';
+import { UserStatus } from '../types/designSystem';
 
 export interface ListTeachersParams {
   page?: number;
@@ -211,6 +216,55 @@ export const adminService = {
   async checkConflict(payload: ConflictCheckPayload): Promise<ConflictDetectionResult> {
     const res = await apiClient.post<ConflictDetectionResult>('/api/v1/appointments/check-conflict', payload);
     return res.data;
+  },
+
+  // -------------------------------------------------------------
+  // User Accounts Management
+  // -------------------------------------------------------------
+  async listUsers(): Promise<{ total: number; users: AdminUserRecord[] }> {
+    const res = await apiClient.get<{ total: number; users: AdminUserRecord[] }>('/api/v1/admin/users');
+    return res.data;
+  },
+
+  async updateUserStatus(
+    id: number,
+    status: UserStatus | string
+  ): Promise<{ userId: number; status: string; message: string }> {
+    const res = await apiClient.patch<{ userId: number; status: string; message: string }>(
+      `/api/v1/admin/users/${id}/status`,
+      { status }
+    );
+    return res.data;
+  },
+
+  // -------------------------------------------------------------
+  // Audit Logs
+  // -------------------------------------------------------------
+  async getAuditLogs(): Promise<{ logs: AuditLogRecord[] }> {
+    const res = await apiClient.get<{ logs: AuditLogRecord[] }>('/api/v1/admin/audit-logs');
+    return res.data;
+  },
+
+  // -------------------------------------------------------------
+  // System Health & Readiness Diagnostics
+  // -------------------------------------------------------------
+  async getHealth(): Promise<SystemHealthData> {
+    const res = await apiClient.get<SystemHealthData>('/api/v1/health');
+    return res.data;
+  },
+
+  async getReadiness(): Promise<SystemReadinessData> {
+    try {
+      const res = await apiClient.get<SystemReadinessData>('/api/v1/ready');
+      return res.data;
+    } catch (err: unknown) {
+      // If readiness endpoint returned 503, preserve diagnostic check data so UI displays what failed
+      const apiErr = err as { data?: SystemReadinessData };
+      if (apiErr?.data && apiErr.data.checks) {
+        return apiErr.data;
+      }
+      throw err;
+    }
   },
 
   // -------------------------------------------------------------

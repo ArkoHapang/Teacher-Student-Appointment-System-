@@ -19,6 +19,16 @@
   }
 }
 
+.ui-header__menu-toggle {
+  display: inline-flex;
+}
+
+@media (min-width: 768px) {
+  .ui-header__menu-toggle {
+    display: none !important;
+  }
+}
+
 .ui-header__brand {
   display: flex;
   align-items: center;

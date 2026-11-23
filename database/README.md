@@ -3,7 +3,7 @@
 ## Overview
 This directory contains the relational database schema, versioned migrations, seed datasets, migration runner, and automated integrity test suite for the university **Teacher–Student Appointment System**.
 
-## Schema Catalog (15 Entities)
+## Schema Catalog (16 Entities)
 
 | Table | Purpose | Integrity Rules & Constraints |
 | :--- | :--- | :--- |
@@ -22,6 +22,7 @@ This directory contains the relational database schema, versioned migrations, se
 | `feedback_ratings` | 1–5 stars evaluation and student reviews | `UNIQUE(appointment_id)`, `CHECK(rating BETWEEN 1 AND 5)` |
 | `notifications` | System alerts, booking confirmations & reminders | `CHECK(type IN ...)`, indexed by `is_read` |
 | `audit_logs` | Administrative audit trail for user moderation | Indexed by `actor_id`, `action`, `created_at` |
+| `revoked_tokens` | Blacklisted JWT IDs (`jti`) for invalidated sessions | `UNIQUE(token_id)`, `FK(user_id)` |
 
 ---
 
@@ -63,11 +64,15 @@ powershell -ExecutionPolicy Bypass -File database/test_schema.ps1
 ```text
 database/
 ├── migrations/
-│   ├── 001_initial_schema.sql      # Core schema DDL & indexes
-│   └── 002_seed_initial_data.sql   # Baseline roles, departments, test users & slots
-├── appointment_system.db           # SQLite database file (gitignored)
-├── schema.sql                      # Cumulative master schema reference
-├── migrate.ps1                     # Native Windows migration runner
-├── test_schema.ps1                 # Automated integrity test suite
-└── README.md                       # Database documentation
+│   ├── 001_initial_schema.sql         # Core schema DDL & indexes
+│   ├── 002_seed_initial_data.sql      # Baseline roles, departments, test users & slots
+│   └── 003_auth_and_session_tokens.sql# Token revocation store & verified password hashes
+├── appointment_system.db              # SQLite database file (gitignored)
+├── schema.sql                         # Cumulative master schema reference
+├── migrate.js                         # Native Node.js migration runner
+├── migrate.ps1                        # Native Windows migration runner
+├── test_schema.ps1                    # Automated integrity test suite
+└── README.md                          # Database documentation
 ```
+
+*For comprehensive database schema specifications and ER diagrams, see [docs/DATABASE.md](../docs/DATABASE.md).*

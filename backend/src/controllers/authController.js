@@ -4,24 +4,20 @@
  */
 
 const authService = require('../services/authService');
-const { loginRateLimiter } = require('../middlewares/rateLimiter');
+const { loginRateLimiter, registrationRateLimiter } = require('../middlewares/rateLimiter');
+const { resolveClientIp } = require('../utils/clientIpResolver');
 const HTTP_STATUS = require('../constants/httpStatusCodes');
 const env = require('../config/env');
 
 const authController = {
   /**
-   * POST /api/v1/auth/login
-   * Public endpoint to authenticate user credentials
+   * POST /api/v1/auth/register
+   * Public endpoint to self-register a student user and student profile atomically
    */
-  async login(req, res, next) {
-    const { email, password } = req.body;
-    const ip = req.ip || req.connection.remoteAddress || '127.0.0.1';
-    const key = `${ip}:${(email || '').trim().toLowerCase()}`;
-
+  async register(req, res, next) {
+    const ip = req.clientIp || resolveClientIp(req);
     try {
-      const result = await authService.login(email, password, ip);
-      // Reset failed attempt counter on success
-      loginRateLimiter.recordSuccess(key);
+      const result = await authService.registerStudent(req.body, ip);
 
       // Set secure HttpOnly cookie for browser sessions
       res.cookie('token', result.token, {
@@ -32,13 +28,66 @@ const authController = {
         path: '/'
       });
 
+      // Browser cookie-only response negotiation (X-Session-Mode: cookie-only)
+      const isCookieOnly = (req.headers['x-session-mode'] || '').toLowerCase() === 'cookie-only';
+      if (isCookieOnly) {
+        const { token, ...sanitizedResult } = result;
+        return res.status(HTTP_STATUS.CREATED).json({
+          success: true,
+          message: 'Student registration completed successfully.',
+          data: sanitizedResult
+        });
+      }
+
+      return res.status(HTTP_STATUS.CREATED).json({
+        success: true,
+        message: 'Student registration completed successfully.',
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  /**
+   * POST /api/v1/auth/login
+   * Public endpoint to authenticate user credentials
+   */
+  async login(req, res, next) {
+    const { email, password } = req.body;
+    const ip = req.clientIp || resolveClientIp(req);
+
+    try {
+      const result = await authService.login(email, password, ip);
+      // Reset failed attempt counter on success
+      loginRateLimiter.recordSuccess(email, ip);
+
+      // Set secure HttpOnly cookie for browser sessions
+      res.cookie('token', result.token, {
+        httpOnly: true,
+        secure: env.isProduction,
+        sameSite: 'strict',
+        maxAge: 24 * 60 * 60 * 1000,
+        path: '/'
+      });
+
+      // Browser cookie-only response negotiation (X-Session-Mode: cookie-only)
+      const isCookieOnly = (req.headers['x-session-mode'] || '').toLowerCase() === 'cookie-only';
+      if (isCookieOnly) {
+        const { token, ...sanitizedResult } = result;
+        return res.status(HTTP_STATUS.OK).json({
+          success: true,
+          data: sanitizedResult
+        });
+      }
+
       return res.status(HTTP_STATUS.OK).json({
         success: true,
         data: result
       });
     } catch (error) {
       // Record failure for brute-force tracking
-      loginRateLimiter.recordFailure(key);
+      loginRateLimiter.recordFailure(email, ip);
       next(error);
     }
   },
@@ -52,7 +101,7 @@ const authController = {
     try {
       const token = req.token ? req.token.raw : null;
       const userId = req.user ? req.user.id : null;
-      const ip = req.ip || req.connection.remoteAddress || '127.0.0.1';
+      const ip = req.clientIp || resolveClientIp(req);
 
       const result = await authService.logout(token, userId, ip);
 
@@ -124,6 +173,96 @@ const authController = {
         user: req.user
       }
     });
+  },
+
+  /**
+   * POST /api/v1/auth/forgot-password
+   * Request password recovery token link (anti-enumeration protected)
+   */
+  async forgotPassword(req, res, next) {
+    const { email } = req.body || {};
+    const ip = req.clientIp || resolveClientIp(req);
+    try {
+      const result = await authService.forgotPassword(email, ip);
+      return res.status(HTTP_STATUS.OK).json({
+        success: true,
+        message: result.message
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  /**
+   * POST /api/v1/auth/reset-password
+   * Set new password using single-use recovery token
+   */
+  async resetPassword(req, res, next) {
+    const { token, newPassword } = req.body || {};
+    const ip = req.clientIp || resolveClientIp(req);
+    try {
+      const result = await authService.resetPassword(token, newPassword, ip);
+      return res.status(HTTP_STATUS.OK).json({
+        success: true,
+        message: result.message
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  /**
+   * POST /api/v1/auth/verify-email
+   * Verify student email identity using registration verification token
+   */
+  async verifyEmail(req, res, next) {
+    const { token } = req.body || {};
+    const ip = req.clientIp || resolveClientIp(req);
+    try {
+      const result = await authService.verifyEmail(token, ip);
+      return res.status(HTTP_STATUS.OK).json({
+        success: true,
+        message: result.message
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  /**
+   * POST /api/v1/auth/resend-verification
+   * Resend student verification link if account pending
+   */
+  async resendVerification(req, res, next) {
+    const { email } = req.body || {};
+    const ip = req.clientIp || resolveClientIp(req);
+    try {
+      const result = await authService.resendVerification(email, ip);
+      return res.status(HTTP_STATUS.OK).json({
+        success: true,
+        message: result.message
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  /**
+   * POST /api/v1/auth/onboard-teacher
+   * Complete faculty onboarding by setting password via invitation token
+   */
+  async onboardTeacher(req, res, next) {
+    const { token, password } = req.body || {};
+    const ip = req.clientIp || resolveClientIp(req);
+    try {
+      const result = await authService.onboardTeacher(token, password, ip);
+      return res.status(HTTP_STATUS.OK).json({
+        success: true,
+        message: result.message
+      });
+    } catch (error) {
+      next(error);
+    }
   }
 };
 

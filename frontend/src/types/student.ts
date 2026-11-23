@@ -93,3 +93,41 @@ export interface StudentNotificationItem {
   isRead: number;
   createdAt: string;
 }
+
+export interface ConsultationFeedback {
+  id: number;
+  appointmentId: number;
+  studentId: number;
+  teacherId: number;
+  rating: number;
+  comments: string | null;
+  createdAt: string;
+}
+
+export interface SubmitFeedbackPayload {
+  rating: number;
+  comments?: string;
+}
+
+export type FeedbackFetchState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'success'; data: ConsultationFeedback | null }
+  | { status: 'error'; error: string };
+
+export interface DepartmentItem {
+  id: number;
+  code: string;
+  name: string;
+}
+
+export interface StudentRegistrationPayload {
+  email: string;
+  password: string;
+  firstName: string;
+  lastName: string;
+  studentIdNumber: string;
+  departmentId: number;
+  batch?: string;
+  phoneNumber?: string;
+}

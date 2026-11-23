@@ -135,8 +135,8 @@ The backend implements JWT token-based authentication with cryptographic passwor
 | `POST` | `/api/v1/auth/logout` | Authenticated | Revokes access token in `revoked_tokens` table |
 | `GET` | `/api/v1/auth/me` | Authenticated | Retrieves current authenticated user & role-specific profile |
 | `GET` | `/api/v1/auth/verify` | Authenticated | Confirms token validity and identity |
-| `GET` | `/api/v1/admin/users` | ADMIN only | Lists all users with role and status |
-| `PATCH`| `/api/v1/admin/users/:id/status` | ADMIN only | Updates user account status (ACTIVE, SUSPENDED, etc.) |
+| `GET` | `/api/v1/admin/users` | ADMIN only | Retrieves all user accounts across roles with statuses |
+| `PATCH`| `/api/v1/admin/users/:id/status` | ADMIN only | Modifies account status (ACTIVE, SUSPENDED, PENDING_APPROVAL) |
 | `GET` | `/api/v1/admin/teachers` | ADMIN only | Paginated teacher directory with search, filtering, and stats |
 | `POST`| `/api/v1/admin/teachers` | ADMIN only | Creates teacher account + faculty profile + course assignments |
 | `GET` | `/api/v1/admin/teachers/:id` | ADMIN only | Retrieves detailed teacher record with slot & appointment metrics |
@@ -153,9 +153,16 @@ The backend implements JWT token-based authentication with cryptographic passwor
 | `GET` | `/api/v1/admin/audit-logs` | ADMIN only | Views system audit logs |
 | `GET` | `/api/v1/users/:id` | Owner or ADMIN | Retrieves private user profile |
 | `PATCH`| `/api/v1/users/:id` | Owner or ADMIN | Updates personal profile |
+| `GET` | `/api/v1/users/:id/notifications` | Owner or ADMIN | Retrieves notifications for user |
+| `PATCH`| `/api/v1/users/:id/notifications/:notificationId/read` | Recipient (req.user.id) | Marks individual notification as read |
+| `PATCH`| `/api/v1/users/:id/notifications/read-all` | Recipient (req.user.id) | Marks all notifications as read for authenticated user |
 | `GET` | `/api/v1/teachers` | Public / Auth | Lists teacher faculty directory |
 | `GET` | `/api/v1/teachers/:id` | Public / Auth | Gets teacher profile details |
 | `PATCH`| `/api/v1/teachers/:id` | Self or ADMIN | Updates teacher profile (office, bio, designation) |
+| `POST`| `/api/v1/appointments/:id/feedback` | Student Owner only | Submits 1–5 star rating and optional comments (max 1000 chars) for COMPLETED consultation; notifies teacher |
+| `GET` | `/api/v1/appointments/:id/feedback` | Student Owner, Assigned Teacher, or ADMIN | Retrieves consultation feedback record (returns `data: null` if not yet reviewed) |
+
+*For complete endpoint specifications, payload schemas, and example requests/responses, see [docs/API.md](../docs/API.md).*
 
 ---
 
@@ -194,3 +201,7 @@ powershell -ExecutionPolicy Bypass -File backend/test_foundation.ps1
 powershell -ExecutionPolicy Bypass -File database/test_schema.ps1
 ```
 
+### 6. Consultation Feedback Test Suite (25 Tests - Phase 5)
+```bash
+npm run test:feedback
+```

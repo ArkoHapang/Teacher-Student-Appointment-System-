@@ -19,6 +19,7 @@
  *    - Strict preservation of appointment records and chronological status audit history.
  */
 
+require('./setup');
 const assert = require('assert');
 const request = require('supertest');
 const app = require('../src/app');
@@ -305,7 +306,7 @@ async function runAdminAppointmentTests() {
     // Section 3: Issue #39 Record Management — Metadata Updates & Validation
     // -------------------------------------------------------------
     // Clean up any stale test fixtures from previously interrupted runs
-    const staleSlots = await db.query("SELECT id FROM teacher_availability_slots WHERE slot_date IN ('2026-11-20', '2026-11-21', '2026-11-22');");
+    const staleSlots = await db.query("SELECT id FROM teacher_availability_slots WHERE slot_date IN ('2026-11-20', '2026-11-21', '2026-11-22', '2028-11-20', '2028-11-21', '2028-11-22');");
     for (const s of staleSlots) {
       await db.execute("DELETE FROM appointment_status_history WHERE appointment_id IN (SELECT id FROM appointments WHERE slot_id = ?);", [s.id]);
       await db.execute("DELETE FROM appointments WHERE slot_id = ?;", [s.id]);
@@ -315,14 +316,14 @@ async function runAdminAppointmentTests() {
     // Set up dedicated test appointment for mutations
     const slotRes1 = await db.execute(
       `INSERT INTO teacher_availability_slots (teacher_id, slot_date, start_time, end_time, start_timestamp, end_timestamp, is_booked, is_active)
-       VALUES (1, '2026-11-20', '10:00:00', '10:30:00', '2026-11-20 10:00:00', '2026-11-20 10:30:00', 1, 1);`
+       VALUES (1, '2028-11-20', '10:00:00', '10:30:00', '2028-11-20 10:00:00', '2028-11-20 10:30:00', 1, 1);`
     );
     const testSlot1Id = slotRes1.lastInsertRowid;
     createdSlotIds.push(testSlot1Id);
 
     const slotRes2 = await db.execute(
       `INSERT INTO teacher_availability_slots (teacher_id, slot_date, start_time, end_time, start_timestamp, end_timestamp, is_booked, is_active)
-       VALUES (1, '2026-11-20', '11:00:00', '11:30:00', '2026-11-20 11:00:00', '2026-11-20 11:30:00', 0, 1);`
+       VALUES (1, '2028-11-20', '11:00:00', '11:30:00', '2028-11-20 11:00:00', '2028-11-20 11:30:00', 0, 1);`
     );
     const testSlot2Id = slotRes2.lastInsertRowid;
     createdSlotIds.push(testSlot2Id);
@@ -455,7 +456,7 @@ async function runAdminAppointmentTests() {
     // Create another appointment to test cancellation and slot release
     const cancelSlotRes = await db.execute(
       `INSERT INTO teacher_availability_slots (teacher_id, slot_date, start_time, end_time, start_timestamp, end_timestamp, is_booked, is_active)
-       VALUES (1, '2026-11-21', '09:00:00', '09:30:00', '2026-11-21 09:00:00', '2026-11-21 09:30:00', 1, 1);`
+       VALUES (1, '2028-11-21', '09:00:00', '09:30:00', '2028-11-21 09:00:00', '2028-11-21 09:30:00', 1, 1);`
     );
     const cancelSlotId = cancelSlotRes.lastInsertRowid;
     createdSlotIds.push(cancelSlotId);
@@ -503,14 +504,14 @@ async function runAdminAppointmentTests() {
     // Setup appointment to test administrative rescheduling
     const reschedSlot1Res = await db.execute(
       `INSERT INTO teacher_availability_slots (teacher_id, slot_date, start_time, end_time, start_timestamp, end_timestamp, is_booked, is_active)
-       VALUES (2, '2026-11-22', '14:00:00', '14:30:00', '2026-11-22 14:00:00', '2026-11-22 14:30:00', 1, 1);`
+       VALUES (2, '2028-11-22', '14:00:00', '14:30:00', '2028-11-22 14:00:00', '2028-11-22 14:30:00', 1, 1);`
     );
     const reschedSlot1Id = reschedSlot1Res.lastInsertRowid;
     createdSlotIds.push(reschedSlot1Id);
 
     const reschedSlot2Res = await db.execute(
       `INSERT INTO teacher_availability_slots (teacher_id, slot_date, start_time, end_time, start_timestamp, end_timestamp, is_booked, is_active)
-       VALUES (2, '2026-11-22', '15:00:00', '15:30:00', '2026-11-22 15:00:00', '2026-11-22 15:30:00', 0, 1);`
+       VALUES (2, '2028-11-22', '15:00:00', '15:30:00', '2028-11-22 15:00:00', '2028-11-22 15:30:00', 0, 1);`
     );
     const reschedSlot2Id = reschedSlot2Res.lastInsertRowid;
     createdSlotIds.push(reschedSlot2Id);
@@ -572,7 +573,7 @@ async function runAdminAppointmentTests() {
       // Create another appointment for Teacher 2
       const slotBusyRes = await db.execute(
         `INSERT INTO teacher_availability_slots (teacher_id, slot_date, start_time, end_time, start_timestamp, end_timestamp, is_booked, is_active)
-         VALUES (2, '2026-11-22', '16:00:00', '16:30:00', '2026-11-22 16:00:00', '2026-11-22 16:30:00', 1, 1);`
+         VALUES (2, '2028-11-22', '16:00:00', '16:30:00', '2028-11-22 16:00:00', '2028-11-22 16:30:00', 1, 1);`
       );
       const slotBusyId = slotRes1.lastInsertRowid;
       createdSlotIds.push(slotBusyRes.lastInsertRowid);

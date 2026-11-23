@@ -24,6 +24,18 @@
   animation: ui-scale-in var(--transition-fast) ease-out;
 }
 
+@media (max-width: 480px) {
+  .ui-dialog-backdrop {
+    padding: var(--space-2);
+  }
+  .ui-dialog__header, .ui-dialog__footer {
+    padding: var(--space-3) var(--space-4);
+  }
+  .ui-dialog__body {
+    padding: var(--space-4);
+  }
+}
+
 /* Sizes */
 .ui-dialog--sm { max-width: 420px; }
 .ui-dialog--md { max-width: 560px; }

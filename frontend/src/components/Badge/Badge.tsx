@@ -63,7 +63,8 @@ export const UserStatusBadge: React.FC<{
   const variantMap: Record<UserStatus, BadgeVariant> = {
     ACTIVE: 'active',
     INACTIVE: 'inactive',
-    SUSPENDED: 'suspended'
+    SUSPENDED: 'suspended',
+    PENDING_APPROVAL: 'pending'
   };
 
   return (

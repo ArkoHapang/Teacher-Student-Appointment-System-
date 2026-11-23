@@ -15,6 +15,7 @@
  * 12. Simultaneous concurrent booking attempts for overlapping slots (atomic serialization)
  */
 
+require('./setup');
 const assert = require('assert');
 const request = require('supertest');
 const app = require('../src/app');
@@ -61,6 +62,15 @@ async function runConflictTests() {
 
   const createdSlotIds = [];
   const createdAppointmentIds = [];
+
+  const getFutureDate = (daysAhead = 7) => {
+    const d = new Date();
+    d.setDate(d.getDate() + daysAhead);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
 
   const createTestSlot = async ({
     teacherId = 1,
@@ -177,7 +187,7 @@ async function runConflictTests() {
     console.log('\n[Suite 2] Booking Workflow Conflict Detection...');
 
     await test('Detects exact duplicate time slot conflict: second booking rejected with 409 Conflict', async () => {
-      const slot1 = await createTestSlot({ teacherId: 1, date: '2026-11-21', start: '10:00:00', end: '10:30:00' });
+      const slot1 = await createTestSlot({ teacherId: 1, date: '2026-11-28', start: '10:00:00', end: '10:30:00' });
 
       // Alice books slot 1
       const book1 = await request(app)
@@ -208,9 +218,9 @@ async function runConflictTests() {
 
     await test('Detects partial overlap (starts during): rejects booking with 409 Conflict', async () => {
       // Existing Slot: 11:00 to 12:00
-      const baseSlot = await createTestSlot({ teacherId: 1, date: '2026-11-21', start: '11:00:00', end: '12:00:00' });
+      const baseSlot = await createTestSlot({ teacherId: 1, date: '2026-11-28', start: '11:00:00', end: '12:00:00' });
       // Overlapping Slot: 11:30 to 12:30 (starts during baseSlot)
-      const overlapSlot = await createTestSlot({ teacherId: 1, date: '2026-11-21', start: '11:30:00', end: '12:30:00' });
+      const overlapSlot = await createTestSlot({ teacherId: 1, date: '2026-11-28', start: '11:30:00', end: '12:30:00' });
 
       // Book base slot
       const res1 = await request(app)
@@ -241,9 +251,9 @@ async function runConflictTests() {
 
     await test('Detects partial overlap (ends during): rejects booking with 409 Conflict', async () => {
       // Existing Slot: 14:00 to 15:00
-      const baseSlot = await createTestSlot({ teacherId: 1, date: '2026-11-21', start: '14:00:00', end: '15:00:00' });
+      const baseSlot = await createTestSlot({ teacherId: 1, date: '2026-11-28', start: '14:00:00', end: '15:00:00' });
       // Overlapping Slot: 13:30 to 14:30 (ends during baseSlot)
-      const overlapSlot = await createTestSlot({ teacherId: 1, date: '2026-11-21', start: '13:30:00', end: '14:30:00' });
+      const overlapSlot = await createTestSlot({ teacherId: 1, date: '2026-11-28', start: '13:30:00', end: '14:30:00' });
 
       const res1 = await request(app)
         .post('/api/v1/appointments')
@@ -271,9 +281,9 @@ async function runConflictTests() {
 
     await test('Detects one appointment contained inside another: rejects booking with 409 Conflict', async () => {
       // Existing Slot: 16:00 to 18:00 (wide slot)
-      const wideSlot = await createTestSlot({ teacherId: 1, date: '2026-11-21', start: '16:00:00', end: '18:00:00' });
+      const wideSlot = await createTestSlot({ teacherId: 1, date: '2026-11-28', start: '16:00:00', end: '18:00:00' });
       // Inside Slot: 16:30 to 17:30 (strictly inside wideSlot)
-      const insideSlot = await createTestSlot({ teacherId: 1, date: '2026-11-21', start: '16:30:00', end: '17:30:00' });
+      const insideSlot = await createTestSlot({ teacherId: 1, date: '2026-11-28', start: '16:30:00', end: '17:30:00' });
 
       const res1 = await request(app)
         .post('/api/v1/appointments')
@@ -300,10 +310,11 @@ async function runConflictTests() {
     });
 
     await test('Allows adjacent appointments for same teacher without conflict (201 Created)', async () => {
+      const adjacentDate = getFutureDate(7);
       // Slot A: 09:00 to 09:30
-      const slotA = await createTestSlot({ teacherId: 1, date: '2026-11-22', start: '09:00:00', end: '09:30:00' });
+      const slotA = await createTestSlot({ teacherId: 1, date: adjacentDate, start: '09:00:00', end: '09:30:00' });
       // Slot B: 09:30 to 10:00 (adjacent immediately after Slot A)
-      const slotB = await createTestSlot({ teacherId: 1, date: '2026-11-22', start: '09:30:00', end: '10:00:00' });
+      const slotB = await createTestSlot({ teacherId: 1, date: adjacentDate, start: '09:30:00', end: '10:00:00' });
 
       const res1 = await request(app)
         .post('/api/v1/appointments')
@@ -329,10 +340,11 @@ async function runConflictTests() {
     });
 
     await test('Allows different teachers at the exact same time without conflict (201 Created)', async () => {
+      const concurrentDate = getFutureDate(8);
       // Teacher 1 (Dr. Miller) at 10:00 - 10:30
-      const millerSlot = await createTestSlot({ teacherId: 1, date: '2026-11-22', start: '10:00:00', end: '10:30:00' });
+      const millerSlot = await createTestSlot({ teacherId: 1, date: concurrentDate, start: '10:00:00', end: '10:30:00' });
       // Teacher 2 (Dr. Jenkins) at exact same time: 10:00 - 10:30
-      const jenkinsSlot = await createTestSlot({ teacherId: 2, date: '2026-11-22', start: '10:00:00', end: '10:30:00' });
+      const jenkinsSlot = await createTestSlot({ teacherId: 2, date: concurrentDate, start: '10:00:00', end: '10:30:00' });
 
       const res1 = await request(app)
         .post('/api/v1/appointments')
@@ -358,8 +370,9 @@ async function runConflictTests() {
     });
 
     await test('Cancelled appointments do NOT conflict: released time can be booked with 201 Created', async () => {
+      const cancelTestDate = getFutureDate(9);
       // 1. Create slot and book it
-      const cancelSlot = await createTestSlot({ teacherId: 1, date: '2026-11-23', start: '11:00:00', end: '11:30:00' });
+      const cancelSlot = await createTestSlot({ teacherId: 1, date: cancelTestDate, start: '11:00:00', end: '11:30:00' });
       const bookRes = await request(app)
         .post('/api/v1/appointments')
         .set('Authorization', `Bearer ${studentAliceToken}`)
@@ -389,7 +402,7 @@ async function runConflictTests() {
 
       // 4. David books an overlapping slot (11:15 - 11:45) on that same released window
       // If Alice's appointment were still active, this overlapping slot would be blocked with 409
-      const releasedWindowSlot = await createTestSlot({ teacherId: 1, date: '2026-11-23', start: '11:15:00', end: '11:45:00' });
+      const releasedWindowSlot = await createTestSlot({ teacherId: 1, date: cancelTestDate, start: '11:15:00', end: '11:45:00' });
       const rebookRes = await request(app)
         .post('/api/v1/appointments')
         .set('Authorization', `Bearer ${studentDavidToken}`)

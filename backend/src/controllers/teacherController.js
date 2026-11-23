@@ -22,7 +22,7 @@ const teacherController = {
          FROM teacher_profiles tp
          JOIN users u ON tp.user_id = u.id
          JOIN departments d ON tp.department_id = d.id
-         WHERE u.status = 'ACTIVE'
+         WHERE u.status = 'ACTIVE' AND tp.is_verified = 1
          ORDER BY tp.id ASC;`
       );
 

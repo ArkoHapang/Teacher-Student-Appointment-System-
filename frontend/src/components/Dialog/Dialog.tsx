@@ -22,7 +22,29 @@ export const Dialog: React.FC<DialogProps> = ({
   closeOnBackdropClick = true
 }) => {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const previousActiveElement = useRef<HTMLElement | null>(null);
   const titleId = `dialog-title-${Math.random().toString(36).substring(2, 9)}`;
+
+  // Handle focus retention and restoration
+  useEffect(() => {
+    if (isOpen) {
+      previousActiveElement.current = document.activeElement as HTMLElement | null;
+      const timer = requestAnimationFrame(() => {
+        dialogRef.current?.focus();
+      });
+      return () => cancelAnimationFrame(timer);
+    } else if (previousActiveElement.current) {
+      previousActiveElement.current.focus();
+      previousActiveElement.current = null;
+    }
+  }, [isOpen]);
+
+  // Clean up focus restoration on unmount
+  useEffect(() => {
+    return () => {
+      previousActiveElement.current?.focus();
+    };
+  }, []);
 
   // Handle Escape key
   useEffect(() => {
@@ -56,7 +78,6 @@ export const Dialog: React.FC<DialogProps> = ({
     <div
       className="ui-dialog-backdrop"
       onClick={closeOnBackdropClick ? onClose : undefined}
-      aria-hidden="true"
     >
       <div
         ref={dialogRef}
