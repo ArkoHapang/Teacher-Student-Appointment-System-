@@ -11,18 +11,16 @@
 [build.environment]
   NODE_VERSION = "22"
 
-# 1. API Proxy Rewrite (Recommended Architecture)
-# Proxies /api/* to the Render backend service so all requests are same-origin
-# from the browser perspective, guaranteeing HttpOnly cookie delivery and CSRF compliance.
-# Replace target URL with your actual deployed Render backend address.
+# Same-origin API proxy to the persistent Fly.io backend.
+# Keeping API traffic on the Netlify origin supports the application's
+# HttpOnly session cookies and credentialed requests.
 [[redirects]]
   from = "/api/*"
-  to = "https://ts-appointment-backend.onrender.com/api/:splat"
+  to = "https://ts-appointment-system.fly.dev/api/:splat"
   status = 200
   force = true
 
-# 2. Single Page Application (SPA) Fallback
-# Directs all direct page navigations and deep links to index.html
+# Single Page Application fallback (keep this rule last).
 [[redirects]]
   from = "/*"
   to = "/index.html"
